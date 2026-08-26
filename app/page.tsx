@@ -29,7 +29,7 @@ export default function Home() {
         <nav aria-label="Navegación principal">
           <p className="nav-label">GESTIÓN</p>
           <a className="nav-item active" href="#inicio"><Icon>⌂</Icon> Inicio</a>
-          <a className="nav-item" href="#clientes"><Icon>♙</Icon> Clientes <span className="nav-count">248</span></a>
+          <a className="nav-item" href="#clientes"><Icon>♙</Icon> Clientes <span className="nav-count">0</span></a>
           <a className="nav-item" href="#planes"><Icon>◇</Icon> Planes</a>
           <a className="nav-item" href="#fidelidad"><Icon>✦</Icon> Fidelidad</a>
           <p className="nav-label secondary">OPERACIÓN</p>
@@ -49,19 +49,19 @@ export default function Home() {
           <div className="top-actions"><button className="icon-button" aria-label="Buscar">⌕</button><button className="icon-button notification" aria-label="Notificaciones">♢<i /></button><button className="primary-button" onClick={() => setClientOpen(true)}><span>＋</span> Nuevo cliente</button></div>
         </header>
         <div className="dashboard" id="inicio">
-          <div className="welcome-row"><div><p className="eyebrow">MIÉRCOLES, 26 DE AGOSTO</p><h1>Buenos días, Milton <span>👋</span></h1><p>Todo está listo para un gran día en el gimnasio.</p></div><button className="period-button">Últimos 7 días <span>⌄</span></button></div>
+          <div className="welcome-row"><div><div className="setup-pill"><i /> CONFIGURACIÓN INICIAL · SIN DATOS</div><p className="eyebrow">MIÉRCOLES, 26 DE AGOSTO</p><h1>Buenos días, Milton <span>👋</span></h1><p>Empieza registrando a tu primer cliente para activar las métricas.</p></div><button className="period-button">Últimos 7 días <span>⌄</span></button></div>
           <section className="scanner-card">
             <div className="scanner-copy"><span className="live-pill"><i /> ESCÁNER LISTO</span><h2>Registra una visita<br />en segundos.</h2><p>Escanea la tarjeta digital del cliente para sumar una asistencia o premiar una meta.</p><button className="scan-button" onClick={openScanner}><span className="scan-symbol">⌗</span> Abrir escáner QR <b>→</b></button><small>También puedes buscar por nombre o teléfono</small></div>
             <div className="scanner-visual" aria-hidden="true"><div className="glow-orb" /><div className="qr-frame"><i className="c1"/><i className="c2"/><i className="c3"/><i className="c4"/><div className="qr-grid">▦</div><span className="scan-line" /></div><div className="floating-card member-float"><span className="avatar avatar-photo">AR</span><div><small>CLIENTE DETECTADO</small><strong>Andrea Rojas</strong></div><b>✓</b></div><div className="floating-card stamp-float"><span>✦</span><div><strong>+1 sello</strong><small>Visita registrada</small></div></div></div>
           </section>
           <section className="metrics-grid">
-            <article className="metric-card"><div className="metric-icon purple">↙</div><div className="metric-top"><span>Visitas hoy</span><small className="positive">↗ 12%</small></div><strong>86</strong><p>vs. 77 el miércoles pasado</p><div className="spark bars">{[35,50,44,72,62,88,76,100,82,94].map((h,i)=><i key={i} style={{height:`${h}%`}} />)}</div></article>
-            <article className="metric-card"><div className="metric-icon lime">♙</div><div className="metric-top"><span>Miembros activos</span><small className="positive">↗ 8 nuevos</small></div><strong>248</strong><p>92% con membresía vigente</p><div className="progress"><i /></div></article>
-            <article className="metric-card"><div className="metric-icon coral">✦</div><div className="metric-top"><span>Sellos entregados</span><small>Esta semana</small></div><strong>342</strong><p>41 premios desbloqueados</p><div className="avatar-stack"><span>AR</span><span>JC</span><span>LM</span><span>+38</span></div></article>
+            <article className="metric-card"><div className="metric-icon purple">↙</div><div className="metric-top"><span>Visitas hoy</span><small>Sin actividad</small></div><strong>0</strong><p>Aún no se registraron ingresos</p><div className="empty-chart"><i/><i/><i/><i/><i/><i/><i/></div></article>
+            <article className="metric-card"><div className="metric-icon lime">♙</div><div className="metric-top"><span>Miembros activos</span><small>Base inicial</small></div><strong>0</strong><p>Registra tu primer cliente</p><div className="progress"><i style={{width:"0%"}} /></div></article>
+            <article className="metric-card"><div className="metric-icon coral">✦</div><div className="metric-top"><span>Sellos entregados</span><small>Esta semana</small></div><strong>0</strong><p>Los sellos aparecerán con las visitas</p><div className="metric-empty">Sin movimientos todavía</div></article>
           </section>
           <section className="bottom-grid">
-            <article className="panel activity-panel"><div className="panel-head"><div><h3>Actividad reciente</h3><p>Movimientos registrados en recepción</p></div><button>Ver todo →</button></div><div className="activity-list">{[{n:"Andrea Rojas",a:"Visita registrada",t:"Hace 2 min",i:"AR",c:"violet"},{n:"Javier Calle",a:"Nuevo sello · Meta de peso",t:"Hace 8 min",i:"JC",c:"orange"},{n:"Lucía Mendoza",a:"Membresía renovada",t:"Hace 21 min",i:"LM",c:"green"}].map(x=><div className="activity" key={x.n}><span className={`avatar ${x.c}`}>{x.i}</span><div><strong>{x.n}</strong><p>{x.a}</p></div><time>{x.t}</time><b>›</b></div>)}</div></article>
-            <article className="panel loyalty-panel"><div className="panel-head"><div><h3>Fidelidad en movimiento</h3><p>Progreso general de tus clientes</p></div><button>•••</button></div><div className="loyalty-ring"><div><strong>78%</strong><span>participación</span></div></div><div className="loyalty-stats"><div><span><i className="dot-lime"/>Tarjetas activas</span><strong>194</strong></div><div><span><i className="dot-purple"/>Cerca de premio</span><strong>37</strong></div></div></article>
+            <article className="panel activity-panel"><div className="panel-head"><div><h3>Actividad reciente</h3><p>Movimientos registrados en recepción</p></div></div><div className="activity-empty"><span>⌁</span><div><strong>Tu historial está listo</strong><p>Las visitas, sellos y renovaciones aparecerán aquí.</p></div><button onClick={() => setClientOpen(true)}>Registrar primer cliente</button></div></article>
+            <article className="panel loyalty-panel"><div className="panel-head"><div><h3>Fidelidad en movimiento</h3><p>Progreso general de tus clientes</p></div><button>•••</button></div><div className="loyalty-ring loyalty-empty"><div><strong>0%</strong><span>participación</span></div></div><div className="loyalty-stats"><div><span><i className="dot-lime"/>Tarjetas activas</span><strong>0</strong></div><div><span><i className="dot-purple"/>Cerca de premio</span><strong>0</strong></div></div></article>
           </section>
         </div>
       </section>

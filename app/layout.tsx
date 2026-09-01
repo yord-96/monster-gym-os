@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -13,21 +12,11 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
-  const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const image = new URL("/og.png", `${protocol}://${host}`).toString();
-  const title = "Monster Gym OS — Gestión y fidelidad";
-  const description = "Clientes, membresías, asistencias y fidelidad en un solo lugar.";
-  return {
-    title,
-    description,
-    icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
-    openGraph: { title, description, images: [{ url: image, width: 1734, height: 907 }] },
-    twitter: { card: "summary_large_image", title, description, images: [image] },
-  };
-}
+export const metadata: Metadata = {
+  title: "Monster Gym OS — Gestión y fidelidad",
+  description: "Clientes, membresías, asistencias y fidelidad en un solo lugar.",
+  icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
+};
 
 export default function RootLayout({
   children,

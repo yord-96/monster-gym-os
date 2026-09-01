@@ -1,0 +1,24 @@
+[Unit]
+Description=Monster Gym OS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yordy
+Group=yordy
+WorkingDirectory=/var/www/monster-gym-os
+Environment=NODE_ENV=production
+Environment=PORT=4100
+ExecStart=/usr/bin/npm start
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillSignal=SIGINT
+MemoryHigh=384M
+MemoryMax=512M
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

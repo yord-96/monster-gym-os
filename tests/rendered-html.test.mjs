@@ -37,7 +37,11 @@ test("incluye persistencia, QR y descarga PNG reales", async () => {
   assert.match(page, /localStorage\.setItem\(STORE_KEY/);
   assert.match(page, /crypto\.randomUUID\(\)/);
   assert.match(page, /QRCode\.toDataURL/);
-  assert.match(page, /monster-gym:\/\/member\//);
+  assert.match(page, /MEMBER_QUERY_KEY = "checkin"/);
+  assert.match(page, /memberQrUrl\(client\.token\)/);
+  assert.match(page, /tokenFromQr\(decoded\)/);
+  assert.match(page, /visitHistory:/);
+  assert.match(page, /formatStampDateTime/);
   assert.match(page, /toPng\(cardRef\.current/);
   assert.match(page, /new Html5Qrcode\("qr-reader"\)/);
   assert.match(page, /setClients\(\(current\) => \[record, \.\.\.current\]\)/);
@@ -45,4 +49,6 @@ test("incluye persistencia, QR y descarga PNG reales", async () => {
   assert.match(css, /\.clients-table/);
   assert.match(css, /\.real-camera/);
   assert.match(css, /@media\(max-width:760px\)/);
+  assert.match(css, /\.top-actions \.primary-button/);
+  assert.match(css, /\.card-last-stamp/);
 });

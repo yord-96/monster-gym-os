@@ -5,7 +5,7 @@ import { toPng } from "html-to-image";
 import QRCode from "qrcode";
 
 type View = "inicio" | "clientes" | "planes" | "fidelidad" | "asistencias" | "reportes";
-type ScanStep = "camera" | "found" | "success";
+type ScanStep = "camera" | "found" | "success" | "missing";
 
 type ClientRecord = {
   id: string;
@@ -19,6 +19,7 @@ type ClientRecord = {
   visits: number;
   stamps: number;
   lastVisit?: string;
+  visitHistory?: string[];
 };
 
 type ActivityRecord = {
@@ -31,6 +32,7 @@ type ActivityRecord = {
 };
 
 const STORE_KEY = "monster-gym-local-v1";
+const MEMBER_QUERY_KEY = "checkin";
 const plans = [
   { name: "Plan Fuerza · Mensual", duration: 30, price: "Bs 180", tone: "purple" },
   { name: "Plan Elite · Trimestral", duration: 90, price: "Bs 480", tone: "lime" },
@@ -39,7 +41,20 @@ const plans = [
 
 const initials = (name: string) => name.split(" ").filter(Boolean).map((word) => word[0]).join("").slice(0, 2).toUpperCase() || "MG";
 const formatDate = (value: string) => new Intl.DateTimeFormat("es-BO", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
+const formatStampDateTime = (value: string) => new Intl.DateTimeFormat("es-BO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 const isToday = (value: string) => new Date(value).toDateString() === new Date().toDateString();
+const memberQrUrl = (token: string) => `${window.location.origin}/?${MEMBER_QUERY_KEY}=${encodeURIComponent(token)}`;
+const tokenFromQr = (value: string) => {
+  const decoded = value.trim();
+  if (decoded.includes("monster-gym://member/")) return decoded.split("monster-gym://member/")[1] ?? "";
+  try {
+    const url = new URL(decoded);
+    return url.searchParams.get(MEMBER_QUERY_KEY) ?? decoded;
+  } catch {
+    return decoded.replace(/^ID\s*/i, "");
+  }
+};
+const clientVisitHistory = (client: ClientRecord) => client.visitHistory ?? (client.lastVisit ? [client.lastVisit] : []);
 
 const Icon = ({ children }: { children: React.ReactNode }) => <span className="nav-icon" aria-hidden="true">{children}</span>;
 
@@ -48,7 +63,7 @@ function LoyaltyGalleryCard({ client, onOpen, onVisit }: { client: ClientRecord;
 
   useEffect(() => {
     let active = true;
-    QRCode.toDataURL(`monster-gym://member/${client.token}`, {
+    QRCode.toDataURL(memberQrUrl(client.token), {
       errorCorrectionLevel: "H",
       width: 320,
       margin: 2,
@@ -72,7 +87,8 @@ function LoyaltyGalleryCard({ client, onOpen, onVisit }: { client: ClientRecord;
       <div className="gallery-card-bottom">
         <div className="gallery-loyalty">
           <div><small>FIDELIDAD</small><strong>{client.stamps}/10 sellos</strong></div>
-          <div className="gallery-stamps">{Array.from({ length: 10 }, (_, index) => <i className={index < client.stamps ? "filled" : ""} key={index}>{index < client.stamps ? "M" : ""}</i>)}</div>
+          <div className="gallery-stamps">{Array.from({ length: 10 }, (_, index) => { const visit = clientVisitHistory(client)[index]; return <i className={index < client.stamps ? "filled" : ""} key={index} title={visit ? `Sello ${index + 1}: ${formatStampDateTime(visit)}` : `Sello ${index + 1} pendiente`} aria-label={visit ? `Sello ${index + 1}, ${formatStampDateTime(visit)}` : `Sello ${index + 1} pendiente`}>{index < client.stamps ? "M" : ""}</i>; })}</div>
+          {client.lastVisit && <span className="gallery-last-stamp">Último sello · {formatStampDateTime(client.lastVisit)}</span>}
         </div>
         <div className="gallery-qr">{qr ? <img src={qr} alt={`QR único de ${client.name}`}/> : <span>QR</span>}</div>
       </div>
@@ -106,6 +122,7 @@ export default function Home() {
   const [scanError, setScanError] = useState("");
   const [manualCode, setManualCode] = useState("");
   const scannerRef = useRef<{ stop: () => Promise<void>; clear: () => void | Promise<void> } | null>(null);
+  const checkInHandledRef = useRef(false);
 
   useEffect(() => {
     const saved = localStorage.getItem(STORE_KEY);
@@ -114,7 +131,7 @@ export default function Home() {
         const parsed = JSON.parse(saved) as { clients?: ClientRecord[]; activities?: ActivityRecord[] };
         // This effect deliberately restores browser-only state after hydration.
         // eslint-disable-next-line react-hooks/set-state-in-effect
-        setClients(parsed.clients ?? []);
+        setClients((parsed.clients ?? []).map((client) => ({ ...client, visitHistory: clientVisitHistory(client) })));
         setActivities(parsed.activities ?? []);
       } catch { localStorage.removeItem(STORE_KEY); }
     }
@@ -133,6 +150,20 @@ export default function Home() {
   }, [clients, activities, hydrated]);
 
   useEffect(() => {
+    if (!hydrated || checkInHandledRef.current) return;
+    const token = new URLSearchParams(location.search).get(MEMBER_QUERY_KEY);
+    if (!token) return;
+    checkInHandledRef.current = true;
+    const found = clients.find((item) => item.token === token || item.token.startsWith(token));
+    history.replaceState({}, "", `${location.pathname}${location.hash}`);
+    // Opening a QR URL intentionally synchronizes browser navigation with modal state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setScannedClient(found ?? null);
+    setScanStep(found ? "found" : "missing");
+    setScannerOpen(true);
+  }, [clients, hydrated]);
+
+  useEffect(() => {
     if (!scannerOpen || scanStep !== "camera") return;
     let cancelled = false;
     const start = async () => {
@@ -145,7 +176,7 @@ export default function Home() {
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 220, height: 220 } },
           async (decoded) => {
-            const token = decoded.includes("monster-gym://member/") ? decoded.split("monster-gym://member/")[1] : decoded;
+            const token = tokenFromQr(decoded);
             const found = clients.find((item) => item.token === token || item.token.startsWith(token.replace(/^ID\s*/i, "")));
             if (!found) { setScanError("El QR no pertenece a un cliente registrado en este equipo."); return; }
             try { await instance.stop(); await instance.clear(); } catch { /* already stopped */ }
@@ -205,7 +236,7 @@ export default function Home() {
   };
 
   const showCard = async (record: ClientRecord) => {
-    const qr = await QRCode.toDataURL(`monster-gym://member/${record.token}`, { errorCorrectionLevel: "H", width: 480, margin: 2, color: { dark: "#17141f", light: "#ffffff" } });
+    const qr = await QRCode.toDataURL(memberQrUrl(record.token), { errorCorrectionLevel: "H", width: 480, margin: 2, color: { dark: "#17141f", light: "#ffffff" } });
     setCardClient(record);
     setQrDataUrl(qr);
     setDownloadStatus("idle");
@@ -221,7 +252,7 @@ export default function Home() {
     const plan = plans.find((item) => item.name === clientForm.plan) ?? plans[0];
     const now = new Date();
     const expiry = new Date(now); expiry.setDate(expiry.getDate() + plan.duration);
-    const record: ClientRecord = { id: crypto.randomUUID(), token, name, phone, plan: plan.name, photo: photoUrl, createdAt: now.toISOString(), expiresAt: expiry.toISOString(), visits: 0, stamps: 0 };
+    const record: ClientRecord = { id: crypto.randomUUID(), token, name, phone, plan: plan.name, photo: photoUrl, createdAt: now.toISOString(), expiresAt: expiry.toISOString(), visits: 0, stamps: 0, visitHistory: [] };
     setClients((current) => [record, ...current]);
     setActivities((current) => [{ id: crypto.randomUUID(), clientId: record.id, clientName: record.name, type: "registro", description: "Cliente registrado", createdAt: now.toISOString() }, ...current]);
     setClientOpen(false);
@@ -236,7 +267,7 @@ export default function Home() {
 
   const findManualClient = (event: React.FormEvent) => {
     event.preventDefault();
-    const code = manualCode.trim().replace(/^monster-gym:\/\/member\//, "").replace(/^ID\s*/i, "");
+    const code = tokenFromQr(manualCode);
     if (!code) { setScanError("Ingresa el código corto o el teléfono del cliente."); return; }
     const found = clients.find((item) => item.token === code || item.token.startsWith(code) || item.phone.includes(code));
     if (!found) { setScanError("No encontramos un cliente con ese código o teléfono."); return; }
@@ -247,7 +278,8 @@ export default function Home() {
     if (!scannedClient) return;
     const now = new Date().toISOString();
     const nextStamps = Math.min(scannedClient.stamps + 1, 10);
-    const updated = { ...scannedClient, visits: scannedClient.visits + 1, stamps: nextStamps, lastVisit: now };
+    const nextVisitHistory = scannedClient.stamps < 10 ? [...clientVisitHistory(scannedClient), now] : clientVisitHistory(scannedClient);
+    const updated = { ...scannedClient, visits: scannedClient.visits + 1, stamps: nextStamps, lastVisit: now, visitHistory: nextVisitHistory };
     setClients((current) => current.map((item) => item.id === updated.id ? updated : item));
     setActivities((current) => [{ id: crypto.randomUUID(), clientId: updated.id, clientName: updated.name, type: nextStamps === 10 ? "premio" : "visita", description: nextStamps === 10 ? "Recompensa desbloqueada" : `Visita registrada · Sello ${nextStamps}/10`, createdAt: now }, ...current]);
     setScannedClient(updated); setScanStep("success");
@@ -259,7 +291,7 @@ export default function Home() {
     try {
       await document.fonts.ready;
       const width = cardRef.current.offsetWidth; const height = cardRef.current.offsetHeight;
-      const image = await toPng(cardRef.current, { width, height, pixelRatio: 1, cacheBust: true, style: { width: `${width}px`, height: `${height}px`, margin: "0", transform: "none" } });
+      const image = await toPng(cardRef.current, { width, height, pixelRatio: 2, cacheBust: true, style: { width: `${width}px`, height: `${height}px`, margin: "0", transform: "none" } });
       const link = document.createElement("a");
       const safeName = cardClient.name.toLowerCase().replace(/[^a-z0-9áéíóúñ]+/gi, "-").replace(/^-|-$/g, "");
       link.download = `tarjeta-monster-${safeName}.png`; link.href = image; link.click(); setDownloadStatus("done");
@@ -306,8 +338,8 @@ export default function Home() {
 
     {clientOpen && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Registrar nuevo cliente"><button className="modal-scrim" aria-label="Cerrar" onClick={() => setClientOpen(false)}/><section className="client-modal"><header><div><span className="modal-kicker">NUEVO MIEMBRO</span><h2>Registra un cliente</h2><p>Se guardará localmente y tendrá un QR único.</p></div><button className="close-button" onClick={() => setClientOpen(false)}>×</button></header><form onSubmit={registerClient}><label className={`photo-input ${photoUrl ? "has-photo" : ""}`}>{photoUrl ? <img src={photoUrl} alt="Vista previa"/> : <span>＋</span>}<strong>{photoUrl ? "Foto cargada" : "Añadir foto"}</strong><small>{photoUrl ? "Pulsa para cambiarla" : "JPG o PNG · máx. 5 MB"}</small><input type="file" accept="image/png,image/jpeg,image/webp" onChange={handlePhoto}/></label><div className="field-grid"><label><span>Nombre completo</span><input required value={clientForm.name} onChange={(event) => setClientForm({...clientForm,name:event.target.value})} placeholder="Ej. Carlos Mendoza"/></label><label><span>WhatsApp</span><input required value={clientForm.phone} onChange={(event) => setClientForm({...clientForm,phone:event.target.value})} placeholder="+591 700 000 00"/></label></div><label className="full-field"><span>Plan de membresía</span><select value={clientForm.plan} onChange={(event) => setClientForm({...clientForm,plan:event.target.value})}>{plans.map((plan)=><option key={plan.name}>{plan.name}</option>)}</select></label>{formError && <p className="form-error">{formError}</p>}<div className="form-note"><span>✦</span><p><strong>Tarjeta de fidelidad incluida</strong><br/>Generaremos un identificador y QR irrepetibles.</p></div><div className="form-actions"><button type="button" onClick={() => setClientOpen(false)}>Cancelar</button><button type="submit">Crear cliente y tarjeta <span>→</span></button></div></form></section></div>}
 
-    {cardOpen && cardClient && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Tarjeta digital"><button className="modal-scrim" aria-label="Cerrar" onClick={() => setCardOpen(false)}/><section className="card-modal"><header><div><span className="modal-kicker">TARJETA DIGITAL</span><h2>{cardClient.name}</h2></div><button className="close-button" onClick={() => setCardOpen(false)}>×</button></header><div className="digital-card" ref={cardRef}><div className="card-top"><div className="mini-brand"><b>M</b><span>MONSTER<br/><small>GYM OS</small></span></div><span className="card-tier">MEMBER</span></div><div className="card-person">{cardClient.photo ? <img className="card-photo card-photo-image" src={cardClient.photo} alt=""/> : <span className="card-photo">{initials(cardClient.name)}</span>}<div><small>MIEMBRO</small><strong>{cardClient.name}</strong><p>{cardClient.plan}</p><code>ID {cardClient.token.slice(0,8).toUpperCase()}</code></div></div><div className="card-bottom"><div><small>FIDELIDAD</small><div className="mini-stamps">{Array.from({length:6},(_,index)=><i key={index} className={index < Math.min(cardClient.stamps,6) ? "on" : ""}>{index < Math.min(cardClient.stamps,6) ? "M" : ""}</i>)}</div></div><div className="qr-code">{qrDataUrl && <img src={qrDataUrl} alt={`QR único de ${cardClient.name}`}/>}</div></div></div><p className="card-help">Identificador único <strong>{cardClient.token.slice(0,8).toUpperCase()}</strong>.</p><div className="share-actions"><button className="download-button" onClick={downloadCard} disabled={downloadStatus === "working"}>{downloadStatus === "working" ? "Generando PNG…" : downloadStatus === "done" ? "✓ PNG descargado" : downloadStatus === "error" ? "Reintentar" : "↓ Descargar PNG"}</button><a className="whatsapp-button" target="_blank" rel="noreferrer" href={`https://wa.me/${cardClient.phone.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${cardClient.name}, tu tarjeta digital de Monster Gym está lista. Te enviaré la imagen a continuación.`)}`}>Abrir WhatsApp ↗</a></div></section></div>}
+    {cardOpen && cardClient && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Tarjeta digital"><button className="modal-scrim" aria-label="Cerrar" onClick={() => setCardOpen(false)}/><section className="card-modal"><header><div><span className="modal-kicker">TARJETA DIGITAL</span><h2>{cardClient.name}</h2></div><button className="close-button" onClick={() => setCardOpen(false)}>×</button></header><div className="digital-card" ref={cardRef}><div className="card-top"><div className="mini-brand"><b>M</b><span>MONSTER<br/><small>GYM OS</small></span></div><span className="card-tier">MEMBER</span></div><div className="card-person">{cardClient.photo ? <img className="card-photo card-photo-image" src={cardClient.photo} alt=""/> : <span className="card-photo">{initials(cardClient.name)}</span>}<div><small>MIEMBRO</small><strong>{cardClient.name}</strong><p>{cardClient.plan}</p><code>ID {cardClient.token.slice(0,8).toUpperCase()}</code></div></div><div className="card-bottom"><div className="card-loyalty"><small>FIDELIDAD · {cardClient.stamps}/10 SELLOS</small><div className="mini-stamps">{Array.from({length:10},(_,index)=>{ const visit = clientVisitHistory(cardClient)[index]; return <i key={index} className={index < cardClient.stamps ? "on" : ""} title={visit ? formatStampDateTime(visit) : "Pendiente"}>{index < cardClient.stamps ? "M" : ""}</i>; })}</div>{cardClient.lastVisit && <span className="card-last-stamp">Último sello · {formatStampDateTime(cardClient.lastVisit)}</span>}</div><div className="qr-code">{qrDataUrl && <img src={qrDataUrl} alt={`QR único de ${cardClient.name}`}/>}</div></div></div><p className="card-help">Escanea este QR desde el sistema para registrar una visita. ID <strong>{cardClient.token.slice(0,8).toUpperCase()}</strong>.</p><div className="share-actions"><button className="download-button" onClick={downloadCard} disabled={downloadStatus === "working"}>{downloadStatus === "working" ? "Generando PNG…" : downloadStatus === "done" ? "✓ PNG descargado" : downloadStatus === "error" ? "Reintentar" : "↓ Descargar PNG"}</button><a className="whatsapp-button" target="_blank" rel="noreferrer" href={`https://wa.me/${cardClient.phone.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${cardClient.name}, tu tarjeta digital de Monster Gym está lista. Te enviaré la imagen a continuación.`)}`}>Abrir WhatsApp ↗</a></div></section></div>}
 
-    {scannerOpen && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Escáner QR"><button className="modal-scrim" aria-label="Cerrar" onClick={closeScanner}/><section className="scanner-modal"><header><div><span className="modal-kicker">RECEPCIÓN</span><h2>{scanStep === "success" ? "¡Visita registrada!" : scanStep === "found" ? "Cliente identificado" : "Escanear tarjeta"}</h2></div><button className="close-button" onClick={closeScanner}>×</button></header>{scanStep === "camera" && <div className="camera-content"><div className="camera-view real-camera"><div id="qr-reader"/><div className="camera-tip">Centra el QR dentro del marco</div></div>{scanError && <p className="scan-error">{scanError}</p>}<form className="manual-scan" onSubmit={findManualClient}><input value={manualCode} onChange={(event) => setManualCode(event.target.value)} placeholder="Código corto o teléfono"/><button>Buscar</button></form><p className="privacy-note">La cámara solo funciona mientras esta ventana está abierta.</p></div>}{scanStep === "found" && scannedClient && <div className="found-client"><div className="member-hero">{scannedClient.photo ? <img className="avatar found-avatar" src={scannedClient.photo} alt=""/> : <span className="avatar found-avatar">{initials(scannedClient.name)}</span>}<span className="verified">✓</span></div><span className="found-label">CLIENTE IDENTIFICADO</span><h3>{scannedClient.name}</h3><p>{scannedClient.plan} · Vigente hasta {formatDate(scannedClient.expiresAt)}</p><div className="stamp-progress"><div className="stamp-copy"><span>Tarjeta de fidelidad</span><strong>{scannedClient.stamps} de 10 sellos</strong></div><div className="stamps">{Array.from({length:10},(_,index)=><i className={index < scannedClient.stamps ? "filled" : ""} key={index}>{index < scannedClient.stamps ? "M" : ""}</i>)}</div></div><button className="confirm-visit" onClick={confirmVisit}>Confirmar visita <span>+1 sello</span></button><button className="text-action" onClick={() => {setScanStep("camera");setScannedClient(null);}}>Escanear otro código</button></div>}{scanStep === "success" && scannedClient && <div className="success-state"><div className="success-burst">✓</div><h3>{scannedClient.name} suma una visita</h3><p>Ahora tiene <strong>{scannedClient.stamps} de 10 sellos.</strong><br/>{scannedClient.stamps === 10 ? "¡Recompensa desbloqueada!" : `Le faltan ${10-scannedClient.stamps} para su recompensa.`}</p><div className="reward-chip"><span>✦</span><div><small>PRÓXIMA RECOMPENSA</small><strong>1 batido proteico gratis</strong></div></div><button className="confirm-visit" onClick={closeScanner}>Listo, continuar</button></div>}</section></div>}
+    {scannerOpen && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Escáner QR"><button className="modal-scrim" aria-label="Cerrar" onClick={closeScanner}/><section className="scanner-modal"><header><div><span className="modal-kicker">RECEPCIÓN</span><h2>{scanStep === "success" ? "¡Visita registrada!" : scanStep === "found" ? "Cliente identificado" : scanStep === "missing" ? "Tarjeta no encontrada" : "Escanear tarjeta"}</h2></div><button className="close-button" onClick={closeScanner}>×</button></header>{scanStep === "camera" && <div className="camera-content"><div className="camera-view real-camera"><div id="qr-reader"/><div className="camera-tip">Centra el QR dentro del marco</div></div>{scanError && <p className="scan-error">{scanError}</p>}<form className="manual-scan" onSubmit={findManualClient}><input value={manualCode} onChange={(event) => setManualCode(event.target.value)} placeholder="Código corto o teléfono"/><button>Buscar</button></form><p className="privacy-note">La cámara solo funciona mientras esta ventana está abierta.</p></div>}{scanStep === "missing" && <div className="missing-state"><div className="missing-symbol">!</div><h3>Este cliente no está guardado en este dispositivo</h3><p>Abre el enlace con el celular donde registraste al cliente o usa el escáner del sistema en ese equipo.</p><button className="confirm-visit" onClick={closeScanner}>Entendido</button></div>}{scanStep === "found" && scannedClient && <div className="found-client"><div className="member-hero">{scannedClient.photo ? <img className="avatar found-avatar" src={scannedClient.photo} alt=""/> : <span className="avatar found-avatar">{initials(scannedClient.name)}</span>}<span className="verified">✓</span></div><span className="found-label">CLIENTE IDENTIFICADO</span><h3>{scannedClient.name}</h3><p>{scannedClient.plan} · Vigente hasta {formatDate(scannedClient.expiresAt)}</p><div className="stamp-progress"><div className="stamp-copy"><span>Tarjeta de fidelidad</span><strong>{scannedClient.stamps} de 10 sellos</strong></div><div className="stamps">{Array.from({length:10},(_,index)=>{ const visit = clientVisitHistory(scannedClient)[index]; return <i className={index < scannedClient.stamps ? "filled" : ""} key={index} title={visit ? formatStampDateTime(visit) : "Pendiente"}>{index < scannedClient.stamps ? "M" : ""}</i>; })}</div>{scannedClient.lastVisit && <small className="scan-last-stamp">Último sello · {formatStampDateTime(scannedClient.lastVisit)}</small>}</div><button className="confirm-visit" onClick={confirmVisit}>Confirmar visita <span>+1 sello</span></button><button className="text-action" onClick={() => {setScanStep("camera");setScannedClient(null);}}>Escanear otro código</button></div>}{scanStep === "success" && scannedClient && <div className="success-state"><div className="success-burst">✓</div><h3>{scannedClient.name} suma una visita</h3><p>Ahora tiene <strong>{scannedClient.stamps} de 10 sellos.</strong><br/><span className="success-time">Sello registrado: {formatStampDateTime(scannedClient.lastVisit ?? new Date().toISOString())}</span><br/>{scannedClient.stamps === 10 ? "¡Recompensa desbloqueada!" : `Le faltan ${10-scannedClient.stamps} para su recompensa.`}</p><div className="reward-chip"><span>✦</span><div><small>PRÓXIMA RECOMPENSA</small><strong>1 batido proteico gratis</strong></div></div><button className="confirm-visit" onClick={closeScanner}>Listo, continuar</button></div>}</section></div>}
   </main>;
 }

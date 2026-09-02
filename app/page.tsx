@@ -122,6 +122,8 @@ export default function Home() {
   const [scanError, setScanError] = useState("");
   const [manualCode, setManualCode] = useState("");
   const scannerRef = useRef<{ stop: () => Promise<void>; clear: () => void | Promise<void> } | null>(null);
+  const scanDetectionLockRef = useRef(false);
+  const visitSubmittingRef = useRef(false);
   const checkInHandledRef = useRef(false);
 
   useEffect(() => {
@@ -168,17 +170,30 @@ export default function Home() {
     let cancelled = false;
     const start = async () => {
       try {
-        const { Html5Qrcode } = await import("html5-qrcode");
+        const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode");
         if (cancelled || !document.getElementById("qr-reader")) return;
-        const instance = new Html5Qrcode("qr-reader");
+        const instance = new Html5Qrcode("qr-reader", {
+          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+          useBarCodeDetectorIfSupported: true,
+        });
         scannerRef.current = instance;
         await instance.start(
           { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 220, height: 220 } },
+          {
+            fps: 15,
+            aspectRatio: 1,
+            qrbox: (viewfinderWidth, viewfinderHeight) => {
+              const size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.78);
+              return { width: size, height: size };
+            },
+          },
           async (decoded) => {
+            if (scanDetectionLockRef.current) return;
             const token = tokenFromQr(decoded);
             const found = clients.find((item) => item.token === token || item.token.startsWith(token.replace(/^ID\s*/i, "")));
             if (!found) { setScanError("El QR no pertenece a un cliente registrado en este equipo."); return; }
+            scanDetectionLockRef.current = true;
+            setScanError("");
             try { await instance.stop(); await instance.clear(); } catch { /* already stopped */ }
             setScannedClient(found);
             setScanStep("found");
@@ -260,10 +275,16 @@ export default function Home() {
   };
 
   const openScanner = () => {
+    scanDetectionLockRef.current = false;
+    visitSubmittingRef.current = false;
     setScanStep("camera"); setScannedClient(null); setScanError(""); setManualCode(""); setScannerOpen(true);
   };
 
-  const closeScanner = () => { setScannerOpen(false); setScannedClient(null); setScanError(""); };
+  const closeScanner = () => {
+    scanDetectionLockRef.current = false;
+    visitSubmittingRef.current = false;
+    setScannerOpen(false); setScannedClient(null); setScanError("");
+  };
 
   const findManualClient = (event: React.FormEvent) => {
     event.preventDefault();
@@ -275,7 +296,8 @@ export default function Home() {
   };
 
   const confirmVisit = () => {
-    if (!scannedClient) return;
+    if (!scannedClient || visitSubmittingRef.current) return;
+    visitSubmittingRef.current = true;
     const now = new Date().toISOString();
     const nextStamps = Math.min(scannedClient.stamps + 1, 10);
     const nextVisitHistory = scannedClient.stamps < 10 ? [...clientVisitHistory(scannedClient), now] : clientVisitHistory(scannedClient);
@@ -340,6 +362,6 @@ export default function Home() {
 
     {cardOpen && cardClient && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Tarjeta digital"><button className="modal-scrim" aria-label="Cerrar" onClick={() => setCardOpen(false)}/><section className="card-modal"><header><div><span className="modal-kicker">TARJETA DIGITAL</span><h2>{cardClient.name}</h2></div><button className="close-button" onClick={() => setCardOpen(false)}>×</button></header><div className="digital-card" ref={cardRef}><div className="card-top"><div className="mini-brand"><b>M</b><span>MONSTER<br/><small>GYM OS</small></span></div><span className="card-tier">MEMBER</span></div><div className="card-person">{cardClient.photo ? <img className="card-photo card-photo-image" src={cardClient.photo} alt=""/> : <span className="card-photo">{initials(cardClient.name)}</span>}<div><small>MIEMBRO</small><strong>{cardClient.name}</strong><p>{cardClient.plan}</p><code>ID {cardClient.token.slice(0,8).toUpperCase()}</code></div></div><div className="card-bottom"><div className="card-loyalty"><small>FIDELIDAD · {cardClient.stamps}/10 SELLOS</small><div className="mini-stamps">{Array.from({length:10},(_,index)=>{ const visit = clientVisitHistory(cardClient)[index]; return <i key={index} className={index < cardClient.stamps ? "on" : ""} title={visit ? formatStampDateTime(visit) : "Pendiente"}>{index < cardClient.stamps ? "M" : ""}</i>; })}</div>{cardClient.lastVisit && <span className="card-last-stamp">Último sello · {formatStampDateTime(cardClient.lastVisit)}</span>}</div><div className="qr-code">{qrDataUrl && <img src={qrDataUrl} alt={`QR único de ${cardClient.name}`}/>}</div></div></div><p className="card-help">Escanea este QR desde el sistema para registrar una visita. ID <strong>{cardClient.token.slice(0,8).toUpperCase()}</strong>.</p><div className="share-actions"><button className="download-button" onClick={downloadCard} disabled={downloadStatus === "working"}>{downloadStatus === "working" ? "Generando PNG…" : downloadStatus === "done" ? "✓ PNG descargado" : downloadStatus === "error" ? "Reintentar" : "↓ Descargar PNG"}</button><a className="whatsapp-button" target="_blank" rel="noreferrer" href={`https://wa.me/${cardClient.phone.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${cardClient.name}, tu tarjeta digital de Monster Gym está lista. Te enviaré la imagen a continuación.`)}`}>Abrir WhatsApp ↗</a></div></section></div>}
 
-    {scannerOpen && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Escáner QR"><button className="modal-scrim" aria-label="Cerrar" onClick={closeScanner}/><section className="scanner-modal"><header><div><span className="modal-kicker">RECEPCIÓN</span><h2>{scanStep === "success" ? "¡Visita registrada!" : scanStep === "found" ? "Cliente identificado" : scanStep === "missing" ? "Tarjeta no encontrada" : "Escanear tarjeta"}</h2></div><button className="close-button" onClick={closeScanner}>×</button></header>{scanStep === "camera" && <div className="camera-content"><div className="camera-view real-camera"><div id="qr-reader"/><div className="camera-tip">Centra el QR dentro del marco</div></div>{scanError && <p className="scan-error">{scanError}</p>}<form className="manual-scan" onSubmit={findManualClient}><input value={manualCode} onChange={(event) => setManualCode(event.target.value)} placeholder="Código corto o teléfono"/><button>Buscar</button></form><p className="privacy-note">La cámara solo funciona mientras esta ventana está abierta.</p></div>}{scanStep === "missing" && <div className="missing-state"><div className="missing-symbol">!</div><h3>Este cliente no está guardado en este dispositivo</h3><p>Abre el enlace con el celular donde registraste al cliente o usa el escáner del sistema en ese equipo.</p><button className="confirm-visit" onClick={closeScanner}>Entendido</button></div>}{scanStep === "found" && scannedClient && <div className="found-client"><div className="member-hero">{scannedClient.photo ? <img className="avatar found-avatar" src={scannedClient.photo} alt=""/> : <span className="avatar found-avatar">{initials(scannedClient.name)}</span>}<span className="verified">✓</span></div><span className="found-label">CLIENTE IDENTIFICADO</span><h3>{scannedClient.name}</h3><p>{scannedClient.plan} · Vigente hasta {formatDate(scannedClient.expiresAt)}</p><div className="stamp-progress"><div className="stamp-copy"><span>Tarjeta de fidelidad</span><strong>{scannedClient.stamps} de 10 sellos</strong></div><div className="stamps">{Array.from({length:10},(_,index)=>{ const visit = clientVisitHistory(scannedClient)[index]; return <i className={index < scannedClient.stamps ? "filled" : ""} key={index} title={visit ? formatStampDateTime(visit) : "Pendiente"}>{index < scannedClient.stamps ? "M" : ""}</i>; })}</div>{scannedClient.lastVisit && <small className="scan-last-stamp">Último sello · {formatStampDateTime(scannedClient.lastVisit)}</small>}</div><button className="confirm-visit" onClick={confirmVisit}>Confirmar visita <span>+1 sello</span></button><button className="text-action" onClick={() => {setScanStep("camera");setScannedClient(null);}}>Escanear otro código</button></div>}{scanStep === "success" && scannedClient && <div className="success-state"><div className="success-burst">✓</div><h3>{scannedClient.name} suma una visita</h3><p>Ahora tiene <strong>{scannedClient.stamps} de 10 sellos.</strong><br/><span className="success-time">Sello registrado: {formatStampDateTime(scannedClient.lastVisit ?? new Date().toISOString())}</span><br/>{scannedClient.stamps === 10 ? "¡Recompensa desbloqueada!" : `Le faltan ${10-scannedClient.stamps} para su recompensa.`}</p><div className="reward-chip"><span>✦</span><div><small>PRÓXIMA RECOMPENSA</small><strong>1 batido proteico gratis</strong></div></div><button className="confirm-visit" onClick={closeScanner}>Listo, continuar</button></div>}</section></div>}
+    {scannerOpen && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Escáner QR"><button className="modal-scrim" aria-label="Cerrar" onClick={closeScanner}/><section className="scanner-modal"><header><div><span className="modal-kicker">RECEPCIÓN</span><h2>{scanStep === "success" ? "¡Visita registrada!" : scanStep === "found" ? "Cliente identificado" : scanStep === "missing" ? "Tarjeta no encontrada" : "Escanear tarjeta"}</h2></div><button className="close-button" onClick={closeScanner}>×</button></header>{scanStep === "camera" && <div className="camera-content"><div className="camera-view real-camera"><div id="qr-reader"/><div className="camera-tip">Centra el QR dentro del marco</div></div>{scanError && <p className="scan-error">{scanError}</p>}<form className="manual-scan" onSubmit={findManualClient}><input value={manualCode} onChange={(event) => setManualCode(event.target.value)} placeholder="Código corto o teléfono"/><button>Buscar</button></form><p className="privacy-note">La cámara solo funciona mientras esta ventana está abierta.</p></div>}{scanStep === "missing" && <div className="missing-state"><div className="missing-symbol">!</div><h3>Este cliente no está guardado en este dispositivo</h3><p>Abre el enlace con el celular donde registraste al cliente o usa el escáner del sistema en ese equipo.</p><button className="confirm-visit" onClick={closeScanner}>Entendido</button></div>}{scanStep === "found" && scannedClient && <div className="found-client"><div className="member-hero">{scannedClient.photo ? <img className="avatar found-avatar" src={scannedClient.photo} alt=""/> : <span className="avatar found-avatar">{initials(scannedClient.name)}</span>}<span className="verified">✓</span></div><span className="found-label">CLIENTE IDENTIFICADO</span><h3>{scannedClient.name}</h3><p>{scannedClient.plan} · Vigente hasta {formatDate(scannedClient.expiresAt)}</p><div className="stamp-progress"><div className="stamp-copy"><span>Tarjeta de fidelidad</span><strong>{scannedClient.stamps} de 10 sellos</strong></div><div className="stamps">{Array.from({length:10},(_,index)=>{ const visit = clientVisitHistory(scannedClient)[index]; return <i className={index < scannedClient.stamps ? "filled" : ""} key={index} title={visit ? formatStampDateTime(visit) : "Pendiente"}>{index < scannedClient.stamps ? "M" : ""}</i>; })}</div>{scannedClient.lastVisit && <small className="scan-last-stamp">Último sello · {formatStampDateTime(scannedClient.lastVisit)}</small>}</div><button className="confirm-visit" onClick={confirmVisit}>Confirmar visita <span>+1 sello</span></button><button className="text-action" onClick={() => {scanDetectionLockRef.current=false;visitSubmittingRef.current=false;setScanStep("camera");setScannedClient(null);setScanError("");}}>Escanear otro código</button></div>}{scanStep === "success" && scannedClient && <div className="success-state"><div className="success-burst">✓</div><h3>{scannedClient.name} suma una visita</h3><p>Ahora tiene <strong>{scannedClient.stamps} de 10 sellos.</strong><br/><span className="success-time">Sello registrado: {formatStampDateTime(scannedClient.lastVisit ?? new Date().toISOString())}</span><br/>{scannedClient.stamps === 10 ? "¡Recompensa desbloqueada!" : `Le faltan ${10-scannedClient.stamps} para su recompensa.`}</p><div className="reward-chip"><span>✦</span><div><small>PRÓXIMA RECOMPENSA</small><strong>1 batido proteico gratis</strong></div></div><button className="confirm-visit" onClick={closeScanner}>Listo, continuar</button></div>}</section></div>}
   </main>;
 }

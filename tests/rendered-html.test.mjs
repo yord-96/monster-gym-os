@@ -43,9 +43,13 @@ test("incluye persistencia, QR y descarga PNG reales", async () => {
   assert.match(page, /visitHistory:/);
   assert.match(page, /formatStampDateTime/);
   assert.match(page, /toPng\(cardRef\.current/);
-  assert.match(page, /new Html5Qrcode\("qr-reader"\)/);
+  assert.match(page, /new Html5Qrcode\("qr-reader",/);
+  assert.match(page, /Html5QrcodeSupportedFormats\.QR_CODE/);
   assert.match(page, /setClients\(\(current\) => \[record, \.\.\.current\]\)/);
   assert.match(page, /visits: scannedClient\.visits \+ 1/);
+  assert.match(page, /scanDetectionLockRef\.current/);
+  assert.match(page, /visitSubmittingRef\.current/);
+  assert.match(page, /if \(!scannedClient \|\| visitSubmittingRef\.current\) return/);
   assert.match(css, /\.clients-table/);
   assert.match(css, /\.real-camera/);
   assert.match(css, /@media\(max-width:760px\)/);

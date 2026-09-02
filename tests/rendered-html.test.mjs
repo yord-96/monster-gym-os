@@ -38,7 +38,8 @@ test("incluye persistencia, QR y descarga PNG reales", async () => {
   assert.match(page, /crypto\.randomUUID\(\)/);
   assert.match(page, /QRCode\.toDataURL/);
   assert.match(page, /MEMBER_QUERY_KEY = "checkin"/);
-  assert.match(page, /memberQrUrl\(client\.token\)/);
+  assert.match(page, /memberQrValue\(client\.token\)/);
+  assert.match(page, /MONSTER-GYM:/);
   assert.match(page, /tokenFromQr\(decoded\)/);
   assert.match(page, /visitHistory:/);
   assert.match(page, /formatStampDateTime/);
@@ -46,10 +47,11 @@ test("incluye persistencia, QR y descarga PNG reales", async () => {
   assert.match(page, /new Html5Qrcode\("qr-reader",/);
   assert.match(page, /Html5QrcodeSupportedFormats\.QR_CODE/);
   assert.match(page, /setClients\(\(current\) => \[record, \.\.\.current\]\)/);
-  assert.match(page, /visits: scannedClient\.visits \+ 1/);
-  assert.match(page, /scanDetectionLockRef\.current/);
+  assert.match(page, /registerVisitForClient/);
+  assert.match(page, /visits: client\.visits \+ 1/);
+  assert.match(page, /scanHandledRef\.current/);
   assert.match(page, /visitSubmittingRef\.current/);
-  assert.match(page, /if \(!scannedClient \|\| visitSubmittingRef\.current\) return/);
+  assert.match(page, /pixelRatio: 3/);
   assert.match(css, /\.clients-table/);
   assert.match(css, /\.real-camera/);
   assert.match(css, /@media\(max-width:760px\)/);

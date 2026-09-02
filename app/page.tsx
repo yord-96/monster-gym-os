@@ -31,7 +31,6 @@ type ActivityRecord = {
   createdAt: string;
 };
 
-const STORE_KEY = "monster-gym-local-v1";
 const MEMBER_QUERY_KEY = "checkin";
 const plans = [
   { name: "Plan Fuerza · Mensual", duration: 30, price: "Bs 180", tone: "purple" },
@@ -56,6 +55,25 @@ const tokenFromQr = (value: string) => {
   }
 };
 const clientVisitHistory = (client: ClientRecord) => client.visitHistory ?? (client.lastVisit ? [client.lastVisit] : []);
+
+const planExpiryInput = (planName: string) => {
+  const plan = plans.find((item) => item.name === planName) ?? plans[0];
+  const value = new Date();
+  value.setDate(value.getDate() + plan.duration);
+  return value.toISOString().slice(0, 10);
+};
+const expiryIsoFromInput = (value: string) => new Date(`${value}T23:59:59`).toISOString();
+
+async function apiJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => ({})) as { error?: string } & T;
+  if (!response.ok) throw new Error(payload.error || `Error ${response.status}`);
+  return payload;
+}
 
 const Icon = ({ children }: { children: React.ReactNode }) => <span className="nav-icon" aria-hidden="true">{children}</span>;
 
@@ -102,14 +120,19 @@ export default function Home() {
   const [view, setView] = useState<View>("inicio");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [centralLoaded, setCentralLoaded] = useState(false);
+  const [centralError, setCentralError] = useState("");
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [activities, setActivities] = useState<ActivityRecord[]>([]);
   const [search, setSearch] = useState("");
 
   const [clientOpen, setClientOpen] = useState(false);
-  const [clientForm, setClientForm] = useState({ name: "", phone: "", plan: plans[0].name });
+  const [editingClient, setEditingClient] = useState<ClientRecord | null>(null);
+  const [deletingClient, setDeletingClient] = useState<ClientRecord | null>(null);
+  const [clientForm, setClientForm] = useState({ name: "", phone: "", plan: plans[0].name, expiresAt: planExpiryInput(plans[0].name) });
   const [photoUrl, setPhotoUrl] = useState("");
   const [formError, setFormError] = useState("");
+  const [clientSaving, setClientSaving] = useState(false);
 
   const [cardOpen, setCardOpen] = useState(false);
   const [cardClient, setCardClient] = useState<ClientRecord | null>(null);
@@ -127,57 +150,73 @@ export default function Home() {
   const scanHandledRef = useRef(false);
   const visitSubmittingRef = useRef(false);
 
-  const registerVisitForClient = useCallback((client: ClientRecord) => {
+  const loadCentralState = useCallback(async (silent = false) => {
+    try {
+      const data = await apiJson<{ clients: ClientRecord[]; activities: ActivityRecord[] }>("/api/state");
+      setClients((data.clients ?? []).map((client) => ({ ...client, visitHistory: clientVisitHistory(client) })));
+      setActivities(data.activities ?? []);
+      setCentralLoaded(true);
+      setCentralError("");
+    } catch (error) {
+      if (!silent) setCentralError(error instanceof Error ? error.message : "No se pudo conectar con la base central.");
+    }
+  }, []);
+
+  const registerVisitForClient = useCallback(async (client: ClientRecord) => {
     if (visitSubmittingRef.current) return;
     visitSubmittingRef.current = true;
-    const now = new Date().toISOString();
-    const nextStamps = Math.min(client.stamps + 1, 10);
-    const nextVisitHistory = client.stamps < 10 ? [...clientVisitHistory(client), now] : clientVisitHistory(client);
-    const updated = { ...client, visits: client.visits + 1, stamps: nextStamps, lastVisit: now, visitHistory: nextVisitHistory };
-    setClients((current) => current.map((item) => item.id === updated.id ? updated : item));
-    setActivities((current) => [{ id: crypto.randomUUID(), clientId: updated.id, clientName: updated.name, type: nextStamps === 10 ? "premio" : "visita", description: nextStamps === 10 ? "Recompensa desbloqueada" : `Visita registrada · Sello ${nextStamps}/10`, createdAt: now }, ...current]);
-    setScannedClient(updated);
-    setScanStep("success");
+    try {
+      const result = await apiJson<{ client: ClientRecord; activity: ActivityRecord }>(`/api/clients/${encodeURIComponent(client.id)}/visit`, { method: "POST" });
+      setClients((current) => current.map((item) => item.id === result.client.id ? result.client : item));
+      setActivities((current) => [result.activity, ...current]);
+      setScannedClient(result.client);
+      setScanStep("success");
+      setCentralError("");
+    } catch (error) {
+      visitSubmittingRef.current = false;
+      setScanError(error instanceof Error ? error.message : "No se pudo registrar la visita.");
+    }
   }, []);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORE_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as { clients?: ClientRecord[]; activities?: ActivityRecord[] };
-        // This effect deliberately restores browser-only state after hydration.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setClients((parsed.clients ?? []).map((client) => ({ ...client, visitHistory: clientVisitHistory(client) })));
-        setActivities(parsed.activities ?? []);
-      } catch { localStorage.removeItem(STORE_KEY); }
-    }
     const updateView = () => {
       const next = location.hash.replace("#", "") as View;
       setView(["inicio", "clientes", "planes", "fidelidad", "asistencias", "reportes"].includes(next) ? next : "inicio");
     };
     updateView();
     addEventListener("hashchange", updateView);
+    // This one-time hydration flag intentionally initializes client-side state after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHydrated(true);
     return () => removeEventListener("hashchange", updateView);
   }, []);
 
   useEffect(() => {
-    if (hydrated) localStorage.setItem(STORE_KEY, JSON.stringify({ clients, activities }));
-  }, [clients, activities, hydrated]);
+    if (!hydrated) return;
+    // Initial synchronization intentionally loads the central server state after hydration.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadCentralState();
+    const refresh = () => { if (document.visibilityState === "visible") void loadCentralState(true); };
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void loadCentralState(true); }, 5000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
+  }, [hydrated, loadCentralState]);
 
   useEffect(() => {
-    if (!hydrated || checkInHandledRef.current) return;
+    if (!centralLoaded || checkInHandledRef.current) return;
     const token = new URLSearchParams(location.search).get(MEMBER_QUERY_KEY);
     if (!token) return;
     checkInHandledRef.current = true;
     const found = clients.find((item) => item.token === token || item.token.startsWith(token));
     history.replaceState({}, "", `${location.pathname}${location.hash}`);
-    // Opening a QR URL intentionally synchronizes browser navigation with modal state.
+    // Legacy URL check-in intentionally opens the scanner result from the URL state.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setScannedClient(found ?? null);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setScanStep(found ? "found" : "missing");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setScannerOpen(true);
-  }, [clients, hydrated]);
+  }, [clients, centralLoaded]);
 
   useEffect(() => {
     if (!scannerOpen || scanStep !== "camera") return;
@@ -205,7 +244,7 @@ export default function Home() {
             if (scanHandledRef.current) return;
             const token = tokenFromQr(decoded);
             const found = clients.find((item) => item.token === token || item.token.startsWith(token.replace(/^ID\s*/i, "")));
-            if (!found) { setScanError("El QR no pertenece a un cliente registrado en este equipo."); return; }
+            if (!found) { setScanError("El QR no pertenece a un cliente registrado en Monster Gym."); return; }
             scanHandledRef.current = true;
             try { await instance.stop(); await instance.clear(); } catch { /* already stopped */ }
             registerVisitForClient(found);
@@ -224,16 +263,8 @@ export default function Home() {
       scannerRef.current = null;
       if (active) {
         void (async () => {
-          try {
-            await active.stop();
-          } catch {
-            // The scanner may already be stopped after a successful read.
-          }
-          try {
-            await active.clear();
-          } catch {
-            // Ignore cleanup races while React is unmounting the camera.
-          }
+          try { await active.stop(); } catch { /* already stopped */ }
+          try { await active.clear(); } catch { /* already cleared */ }
         })();
       }
     };
@@ -246,8 +277,17 @@ export default function Home() {
   };
 
   const openNewClient = () => {
-    setClientForm({ name: "", phone: "", plan: plans[0].name });
+    setEditingClient(null);
+    setClientForm({ name: "", phone: "", plan: plans[0].name, expiresAt: planExpiryInput(plans[0].name) });
     setPhotoUrl("");
+    setFormError("");
+    setClientOpen(true);
+  };
+
+  const openEditClient = (client: ClientRecord) => {
+    setEditingClient(client);
+    setClientForm({ name: client.name, phone: client.phone, plan: client.plan, expiresAt: client.expiresAt.slice(0, 10) });
+    setPhotoUrl(client.photo);
     setFormError("");
     setClientOpen(true);
   };
@@ -283,20 +323,48 @@ export default function Home() {
     setCardOpen(true);
   };
 
-  const registerClient = async (event: React.FormEvent) => {
+  const saveClient = async (event: React.FormEvent) => {
     event.preventDefault();
     const name = clientForm.name.trim();
     const phone = clientForm.phone.trim();
-    if (!name || !phone) { setFormError("Completa el nombre y el WhatsApp."); return; }
-    const token = crypto.randomUUID();
-    const plan = plans.find((item) => item.name === clientForm.plan) ?? plans[0];
-    const now = new Date();
-    const expiry = new Date(now); expiry.setDate(expiry.getDate() + plan.duration);
-    const record: ClientRecord = { id: crypto.randomUUID(), token, name, phone, plan: plan.name, photo: photoUrl, createdAt: now.toISOString(), expiresAt: expiry.toISOString(), visits: 0, stamps: 0, visitHistory: [] };
-    setClients((current) => [record, ...current]);
-    setActivities((current) => [{ id: crypto.randomUUID(), clientId: record.id, clientName: record.name, type: "registro", description: "Cliente registrado", createdAt: now.toISOString() }, ...current]);
-    setClientOpen(false);
-    await showCard(record);
+    if (!name || !phone || !clientForm.expiresAt) { setFormError("Completa nombre, WhatsApp y vencimiento."); return; }
+    setClientSaving(true);
+    setFormError("");
+    try {
+      const body = JSON.stringify({ name, phone, plan: clientForm.plan, photo: photoUrl, expiresAt: expiryIsoFromInput(clientForm.expiresAt) });
+      if (editingClient) {
+        const result = await apiJson<{ client: ClientRecord }>(`/api/clients/${encodeURIComponent(editingClient.id)}`, { method: "PUT", body });
+        setClients((current) => current.map((item) => item.id === result.client.id ? result.client : item));
+        setCardClient((current) => current?.id === result.client.id ? result.client : current);
+        setClientOpen(false);
+      } else {
+        const result = await apiJson<{ client: ClientRecord; activity: ActivityRecord }>("/api/clients", { method: "POST", body });
+        setClients((current) => [result.client, ...current]);
+        setActivities((current) => [result.activity, ...current]);
+        setClientOpen(false);
+        await showCard(result.client);
+      }
+      setCentralError("");
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "No se pudo guardar el cliente.");
+    } finally {
+      setClientSaving(false);
+    }
+  };
+
+  const deleteClientRecord = async () => {
+    if (!deletingClient) return;
+    const target = deletingClient;
+    try {
+      await apiJson<{ ok: boolean }>(`/api/clients/${encodeURIComponent(target.id)}`, { method: "DELETE" });
+      setClients((current) => current.filter((item) => item.id !== target.id));
+      setActivities((current) => current.filter((item) => item.clientId !== target.id));
+      if (cardClient?.id === target.id) setCardOpen(false);
+      setDeletingClient(null);
+      setCentralError("");
+    } catch (error) {
+      setCentralError(error instanceof Error ? error.message : "No se pudo eliminar el cliente.");
+    }
   };
 
   const openScanner = () => {
@@ -353,7 +421,7 @@ export default function Home() {
     <section className="metrics-grid">
       <article className="metric-card"><div className="metric-icon purple">↙</div><div className="metric-top"><span>Visitas hoy</span><small>{todayVisits ? "Actualizado" : "Sin actividad"}</small></div><strong>{todayVisits}</strong><p>{todayVisits ? "Ingresos confirmados hoy" : "Aún no se registraron ingresos"}</p><div className="empty-chart"><i/><i/><i/><i/><i/><i/><i/></div></article>
       <article className="metric-card"><div className="metric-icon lime">♙</div><div className="metric-top"><span>Miembros activos</span><small>{clients.length} total</small></div><strong>{activeClients}</strong><p>{activeClients ? "Con membresía vigente" : "Registra tu primer cliente"}</p><div className="progress"><i style={{ width: clients.length ? `${Math.round(activeClients / clients.length * 100)}%` : "0%" }}/></div></article>
-      <article className="metric-card"><div className="metric-icon coral">✦</div><div className="metric-top"><span>Sellos entregados</span><small>Acumulado</small></div><strong>{totalStamps}</strong><p>{nearReward} cliente{nearReward === 1 ? "" : "s"} cerca de premio</p><div className="metric-empty">Datos guardados localmente</div></article>
+      <article className="metric-card"><div className="metric-icon coral">✦</div><div className="metric-top"><span>Sellos entregados</span><small>Acumulado</small></div><strong>{totalStamps}</strong><p>{nearReward} cliente{nearReward === 1 ? "" : "s"} cerca de premio</p><div className="metric-empty">Base central sincronizada</div></article>
     </section>
     <section className="bottom-grid">
       <article className="panel activity-panel"><div className="panel-head"><div><h3>Actividad reciente</h3><p>Movimientos registrados en recepción</p></div><button onClick={() => go("asistencias")}>Ver todo →</button></div>{activities.length ? <div className="activity-list">{activities.slice(0,4).map((item) => <div className="activity" key={item.id}><span className="avatar violet">{initials(item.clientName)}</span><div><strong>{item.clientName}</strong><p>{item.description}</p></div><time>{formatDate(item.createdAt)}</time></div>)}</div> : <div className="activity-empty"><span>⌁</span><div><strong>Tu historial está listo</strong><p>Las visitas, sellos y registros aparecerán aquí.</p></div><button onClick={openNewClient}>Registrar primer cliente</button></div>}</article>
@@ -361,26 +429,28 @@ export default function Home() {
     </section>
   </>;
 
-  const clientsView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">GESTIÓN DE MIEMBROS</span><h1>Clientes</h1><p>{clients.length} cliente{clients.length === 1 ? " registrado" : "s registrados"} en este equipo.</p></div><button className="primary-button page-action" onClick={openNewClient}>＋ Nuevo cliente</button></div><div className="list-toolbar"><div className="search-box">⌕<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nombre, teléfono o plan"/></div><span>{filteredClients.length} resultado{filteredClients.length === 1 ? "" : "s"}</span></div>{filteredClients.length ? <div className="clients-table"><div className="client-row table-head"><span>Cliente</span><span>Plan</span><span>Fidelidad</span><span>Estado</span><span/></div>{filteredClients.map((item) => <div className="client-row" key={item.id}><div className="client-identity">{item.photo ? <img src={item.photo} alt=""/> : <span className="avatar violet">{initials(item.name)}</span>}<div><strong>{item.name}</strong><small>{item.phone}</small></div></div><div><strong>{item.plan.split(" · ")[0]}</strong><small>Vence {formatDate(item.expiresAt)}</small></div><div><strong>{item.stamps}/10 sellos</strong><div className="row-progress"><i style={{width:`${item.stamps * 10}%`}}/></div></div><span className={`status-badge ${new Date(item.expiresAt) >= new Date() ? "active" : "expired"}`}>{new Date(item.expiresAt) >= new Date() ? "Activo" : "Vencido"}</span><div className="row-actions"><button onClick={() => showCard(item)}>Ver tarjeta</button><button onClick={() => { setScannedClient(item); setScanStep("found"); setScannerOpen(true); }}>＋ Visita</button></div></div>)}</div> : <div className="big-empty"><span>♙</span><h2>No hay clientes todavía</h2><p>Registra al primero y aparecerá aquí inmediatamente.</p><button onClick={openNewClient}>Registrar cliente</button></div>}</section>;
+  const clientsView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">GESTIÓN DE MIEMBROS</span><h1>Clientes</h1><p>{clients.length} cliente{clients.length === 1 ? " registrado" : "s registrados"} en este equipo.</p></div><button className="primary-button page-action" onClick={openNewClient}>＋ Nuevo cliente</button></div><div className="list-toolbar"><div className="search-box">⌕<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nombre, teléfono o plan"/></div><span>{filteredClients.length} resultado{filteredClients.length === 1 ? "" : "s"}</span></div>{filteredClients.length ? <div className="clients-table"><div className="client-row table-head"><span>Cliente</span><span>Plan</span><span>Fidelidad</span><span>Estado</span><span/></div>{filteredClients.map((item) => <div className="client-row" key={item.id}><div className="client-identity">{item.photo ? <img src={item.photo} alt=""/> : <span className="avatar violet">{initials(item.name)}</span>}<div><strong>{item.name}</strong><small>{item.phone}</small></div></div><div><strong>{item.plan.split(" · ")[0]}</strong><small>Vence {formatDate(item.expiresAt)}</small></div><div><strong>{item.stamps}/10 sellos</strong><div className="row-progress"><i style={{width:`${item.stamps * 10}%`}}/></div></div><span className={`status-badge ${new Date(item.expiresAt) >= new Date() ? "active" : "expired"}`}>{new Date(item.expiresAt) >= new Date() ? "Activo" : "Vencido"}</span><div className="row-actions"><button onClick={() => showCard(item)}>Tarjeta</button><button onClick={() => openEditClient(item)}>Editar</button><button className="danger-action" onClick={() => setDeletingClient(item)}>Eliminar</button><button onClick={() => { visitSubmittingRef.current=false; setScannedClient(item); setScanStep("found"); setScannerOpen(true); }}>＋ Visita</button></div></div>)}</div> : <div className="big-empty"><span>♙</span><h2>No hay clientes todavía</h2><p>Registra al primero y aparecerá aquí inmediatamente.</p><button onClick={openNewClient}>Registrar cliente</button></div>}</section>;
 
   const plansView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">MEMBRESÍAS</span><h1>Planes</h1><p>Opciones disponibles para asignar a tus clientes.</p></div></div><div className="plan-grid">{plans.map((plan) => <article className="plan-card" key={plan.name}><span className={`plan-symbol ${plan.tone}`}>◇</span><small>{plan.duration} DÍAS</small><h2>{plan.name.split(" · ")[0]}</h2><strong>{plan.price}</strong><p>{clients.filter((item) => item.plan === plan.name).length} miembros asignados</p><button onClick={openNewClient}>Asignar a un cliente →</button></article>)}</div></section>;
 
-  const loyaltyView = <section className="view-page loyalty-page"><div className="view-heading"><div><span className="view-kicker">GALERÍA DE TARJETAS</span><h1>Fidelidad</h1><p>Visualiza el QR y los sellos de cada cliente en su tarjeta digital.</p></div><button className="primary-button page-action" onClick={openNewClient}>＋ Nuevo cliente</button></div>{clients.length ? <><div className="list-toolbar loyalty-toolbar"><div className="search-box">⌕<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar una tarjeta por cliente, teléfono o plan"/></div><span>{filteredClients.length} tarjeta{filteredClients.length === 1 ? "" : "s"}</span></div>{filteredClients.length ? <div className="loyalty-gallery">{filteredClients.map((item) => <LoyaltyGalleryCard client={item} key={item.id} onOpen={showCard} onVisit={(client) => { setScannedClient(client); setScanStep("found"); setScannerOpen(true); }}/>)}</div> : <div className="big-empty"><span>⌕</span><h2>No encontramos esa tarjeta</h2><p>Prueba buscando por otro nombre, teléfono o plan.</p></div>}</> : <div className="big-empty"><span>✦</span><h2>Sin tarjetas activas</h2><p>Las tarjetas aparecerán al registrar clientes.</p><button onClick={openNewClient}>Registrar cliente</button></div>}</section>;
+  const loyaltyView = <section className="view-page loyalty-page"><div className="view-heading"><div><span className="view-kicker">GALERÍA DE TARJETAS</span><h1>Fidelidad</h1><p>Visualiza el QR y los sellos de cada cliente en su tarjeta digital.</p></div><button className="primary-button page-action" onClick={openNewClient}>＋ Nuevo cliente</button></div>{clients.length ? <><div className="list-toolbar loyalty-toolbar"><div className="search-box">⌕<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar una tarjeta por cliente, teléfono o plan"/></div><span>{filteredClients.length} tarjeta{filteredClients.length === 1 ? "" : "s"}</span></div>{filteredClients.length ? <div className="loyalty-gallery">{filteredClients.map((item) => <LoyaltyGalleryCard client={item} key={item.id} onOpen={showCard} onVisit={(client) => { visitSubmittingRef.current=false; setScannedClient(client); setScanStep("found"); setScannerOpen(true); }}/>)}</div> : <div className="big-empty"><span>⌕</span><h2>No encontramos esa tarjeta</h2><p>Prueba buscando por otro nombre, teléfono o plan.</p></div>}</> : <div className="big-empty"><span>✦</span><h2>Sin tarjetas activas</h2><p>Las tarjetas aparecerán al registrar clientes.</p><button onClick={openNewClient}>Registrar cliente</button></div>}</section>;
 
-  const attendanceView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">OPERACIÓN</span><h1>Asistencias</h1><p>Historial local de registros y visitas.</p></div><button className="primary-button page-action" onClick={openScanner}>⌗ Escanear QR</button></div>{activities.length ? <div className="history-list">{activities.map((item) => <article key={item.id}><span className={`history-icon ${item.type}`}>{item.type === "registro" ? "＋" : item.type === "premio" ? "✦" : "✓"}</span><div><strong>{item.clientName}</strong><p>{item.description}</p></div><time>{new Date(item.createdAt).toLocaleString("es-BO")}</time></article>)}</div> : <div className="big-empty"><span>✓</span><h2>Aún no hay movimientos</h2><p>Registra un cliente o escanea una tarjeta.</p></div>}</section>;
+  const attendanceView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">OPERACIÓN</span><h1>Asistencias</h1><p>Historial central de registros y visitas.</p></div><button className="primary-button page-action" onClick={openScanner}>⌗ Escanear QR</button></div>{activities.length ? <div className="history-list">{activities.map((item) => <article key={item.id}><span className={`history-icon ${item.type}`}>{item.type === "registro" ? "＋" : item.type === "premio" ? "✦" : "✓"}</span><div><strong>{item.clientName}</strong><p>{item.description}</p></div><time>{new Date(item.createdAt).toLocaleString("es-BO")}</time></article>)}</div> : <div className="big-empty"><span>✓</span><h2>Aún no hay movimientos</h2><p>Registra un cliente o escanea una tarjeta.</p></div>}</section>;
 
-  const reportsView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">RESUMEN LOCAL</span><h1>Reportes</h1><p>Indicadores calculados con los datos guardados en este navegador.</p></div></div><div className="report-grid"><article><span>Clientes registrados</span><strong>{clients.length}</strong><p>{activeClients} membresías vigentes</p></article><article><span>Visitas acumuladas</span><strong>{clients.reduce((sum,item)=>sum+item.visits,0)}</strong><p>{todayVisits} registradas hoy</p></article><article><span>Sellos entregados</span><strong>{totalStamps}</strong><p>{nearReward} cerca de recompensa</p></article></div></section>;
+  const reportsView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">RESUMEN LOCAL</span><h1>Reportes</h1><p>Indicadores calculados desde la base central de Monster Gym.</p></div></div><div className="report-grid"><article><span>Clientes registrados</span><strong>{clients.length}</strong><p>{activeClients} membresías vigentes</p></article><article><span>Visitas acumuladas</span><strong>{clients.reduce((sum,item)=>sum+item.visits,0)}</strong><p>{todayVisits} registradas hoy</p></article><article><span>Sellos entregados</span><strong>{totalStamps}</strong><p>{nearReward} cerca de recompensa</p></article></div></section>;
 
   const content: Record<View, React.ReactNode> = { inicio: dashboardView, clientes: clientsView, planes: plansView, fidelidad: loyaltyView, asistencias: attendanceView, reportes: reportsView };
 
   return <main className="app-shell">
-    <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div><nav aria-label="Navegación principal"><p className="nav-label">GESTIÓN</p><button className={`nav-item ${view === "inicio" ? "active" : ""}`} onClick={() => go("inicio")}><Icon>⌂</Icon> Inicio</button><button className={`nav-item ${view === "clientes" ? "active" : ""}`} onClick={() => go("clientes")}><Icon>♙</Icon> Clientes <span className="nav-count">{clients.length}</span></button><button className={`nav-item ${view === "planes" ? "active" : ""}`} onClick={() => go("planes")}><Icon>◇</Icon> Planes</button><button className={`nav-item ${view === "fidelidad" ? "active" : ""}`} onClick={() => go("fidelidad")}><Icon>✦</Icon> Fidelidad</button><p className="nav-label secondary">OPERACIÓN</p><button className={`nav-item ${view === "asistencias" ? "active" : ""}`} onClick={() => go("asistencias")}><Icon>✓</Icon> Asistencias</button><button className={`nav-item ${view === "reportes" ? "active" : ""}`} onClick={() => go("reportes")}><Icon>↗</Icon> Reportes</button></nav><div className="sidebar-footer"><div className="storage-mini"><span className="status-dot"/><div><strong>MODO LOCAL</strong><small>Datos en este navegador</small></div></div><button className="profile-button"><span className="avatar avatar-small">MO</span><span><strong>Milton Ortiz</strong><small>Administrador</small></span></button></div></aside>
-    {sidebarOpen && <button className="backdrop" aria-label="Cerrar menú" onClick={() => setSidebarOpen(false)}/>}<section className="main-content"><header className="topbar"><button className="menu-button" aria-label="Abrir menú" onClick={() => setSidebarOpen(true)}>☰</button><div className="gym-status"><span className="status-dot"/> Monster Gym — Sucursal Central</div><div className="top-actions"><button className="icon-button" aria-label="Buscar clientes" onClick={() => go("clientes")}>⌕</button><button className="primary-button" onClick={openNewClient}><span>＋</span> Nuevo cliente</button></div></header><div className="dashboard">{content[view]}</div></section>
+    <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div><nav aria-label="Navegación principal"><p className="nav-label">GESTIÓN</p><button className={`nav-item ${view === "inicio" ? "active" : ""}`} onClick={() => go("inicio")}><Icon>⌂</Icon> Inicio</button><button className={`nav-item ${view === "clientes" ? "active" : ""}`} onClick={() => go("clientes")}><Icon>♙</Icon> Clientes <span className="nav-count">{clients.length}</span></button><button className={`nav-item ${view === "planes" ? "active" : ""}`} onClick={() => go("planes")}><Icon>◇</Icon> Planes</button><button className={`nav-item ${view === "fidelidad" ? "active" : ""}`} onClick={() => go("fidelidad")}><Icon>✦</Icon> Fidelidad</button><p className="nav-label secondary">OPERACIÓN</p><button className={`nav-item ${view === "asistencias" ? "active" : ""}`} onClick={() => go("asistencias")}><Icon>✓</Icon> Asistencias</button><button className={`nav-item ${view === "reportes" ? "active" : ""}`} onClick={() => go("reportes")}><Icon>↗</Icon> Reportes</button></nav><div className="sidebar-footer"><div className="storage-mini"><span className="status-dot"/><div><strong>BASE CENTRAL</strong><small>Sincronizada entre dispositivos</small></div></div><button className="profile-button"><span className="avatar avatar-small">MO</span><span><strong>Milton Ortiz</strong><small>Administrador</small></span></button></div></aside>
+    {sidebarOpen && <button className="backdrop" aria-label="Cerrar menú" onClick={() => setSidebarOpen(false)}/>}<section className="main-content"><header className="topbar"><button className="menu-button" aria-label="Abrir menú" onClick={() => setSidebarOpen(true)}>☰</button><div className="gym-status"><span className="status-dot"/> Monster Gym — Sucursal Central</div><div className="top-actions"><button className="icon-button" aria-label="Buscar clientes" onClick={() => go("clientes")}>⌕</button><button className="primary-button" onClick={openNewClient}><span>＋</span> Nuevo cliente</button></div></header><div className="dashboard">{centralError && <div className="central-error"><strong>Sin conexión con la base central.</strong><span>{centralError}</span><button onClick={() => void loadCentralState()}>Reintentar</button></div>}{!centralLoaded && !centralError && <div className="central-loading">Sincronizando datos…</div>}{content[view]}</div></section>
 
-    {clientOpen && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Registrar nuevo cliente"><button className="modal-scrim" aria-label="Cerrar" onClick={() => setClientOpen(false)}/><section className="client-modal"><header><div><span className="modal-kicker">NUEVO MIEMBRO</span><h2>Registra un cliente</h2><p>Se guardará localmente y tendrá un QR único.</p></div><button className="close-button" onClick={() => setClientOpen(false)}>×</button></header><form onSubmit={registerClient}><label className={`photo-input ${photoUrl ? "has-photo" : ""}`}>{photoUrl ? <img src={photoUrl} alt="Vista previa"/> : <span>＋</span>}<strong>{photoUrl ? "Foto cargada" : "Añadir foto"}</strong><small>{photoUrl ? "Pulsa para cambiarla" : "JPG o PNG · máx. 5 MB"}</small><input type="file" accept="image/png,image/jpeg,image/webp" onChange={handlePhoto}/></label><div className="field-grid"><label><span>Nombre completo</span><input required value={clientForm.name} onChange={(event) => setClientForm({...clientForm,name:event.target.value})} placeholder="Ej. Carlos Mendoza"/></label><label><span>WhatsApp</span><input required value={clientForm.phone} onChange={(event) => setClientForm({...clientForm,phone:event.target.value})} placeholder="+591 700 000 00"/></label></div><label className="full-field"><span>Plan de membresía</span><select value={clientForm.plan} onChange={(event) => setClientForm({...clientForm,plan:event.target.value})}>{plans.map((plan)=><option key={plan.name}>{plan.name}</option>)}</select></label>{formError && <p className="form-error">{formError}</p>}<div className="form-note"><span>✦</span><p><strong>Tarjeta de fidelidad incluida</strong><br/>Generaremos un identificador y QR irrepetibles.</p></div><div className="form-actions"><button type="button" onClick={() => setClientOpen(false)}>Cancelar</button><button type="submit">Crear cliente y tarjeta <span>→</span></button></div></form></section></div>}
+    {clientOpen && <div className="modal-layer" role="dialog" aria-modal="true" aria-label={editingClient ? "Editar cliente" : "Registrar nuevo cliente"}><button className="modal-scrim" aria-label="Cerrar" onClick={() => setClientOpen(false)}/><section className="client-modal"><header><div><span className="modal-kicker">{editingClient ? "EDITAR MIEMBRO" : "NUEVO MIEMBRO"}</span><h2>{editingClient ? "Editar cliente" : "Registra un cliente"}</h2><p>{editingClient ? "Los cambios se sincronizarán en todos los dispositivos." : "Se guardará en la base central y tendrá un QR único."}</p></div><button className="close-button" onClick={() => setClientOpen(false)}>×</button></header><form onSubmit={saveClient}><label className={`photo-input ${photoUrl ? "has-photo" : ""}`}>{photoUrl ? <img src={photoUrl} alt="Vista previa"/> : <span>＋</span>}<strong>{photoUrl ? "Foto cargada" : "Añadir foto"}</strong><small>{photoUrl ? "Pulsa para cambiarla" : "JPG o PNG · máx. 5 MB"}</small><input type="file" accept="image/png,image/jpeg,image/webp" onChange={handlePhoto}/></label><div className="field-grid"><label><span>Nombre completo</span><input required value={clientForm.name} onChange={(event) => setClientForm({...clientForm,name:event.target.value})} placeholder="Ej. Carlos Mendoza"/></label><label><span>WhatsApp</span><input required value={clientForm.phone} onChange={(event) => setClientForm({...clientForm,phone:event.target.value})} placeholder="+591 700 000 00"/></label></div><div className="field-grid"><label className="full-field compact-field"><span>Plan de membresía</span><select value={clientForm.plan} onChange={(event) => { const plan = event.target.value; setClientForm({...clientForm,plan,expiresAt: editingClient ? clientForm.expiresAt : planExpiryInput(plan)}); }}>{plans.map((plan)=><option key={plan.name}>{plan.name}</option>)}</select></label><label className="full-field compact-field"><span>Vigente hasta</span><input type="date" required value={clientForm.expiresAt} onChange={(event) => setClientForm({...clientForm,expiresAt:event.target.value})}/></label></div>{formError && <p className="form-error">{formError}</p>}<div className="form-note"><span>✦</span><p><strong>{editingClient ? "Identidad y QR preservados" : "Tarjeta de fidelidad incluida"}</strong><br/>{editingClient ? "Editar el cliente no borra sus visitas, sellos ni código QR." : "Generaremos un identificador y QR irrepetibles."}</p></div><div className="form-actions"><button type="button" onClick={() => setClientOpen(false)}>Cancelar</button><button type="submit" disabled={clientSaving}>{clientSaving ? "Guardando…" : editingClient ? "Guardar cambios" : "Crear cliente y tarjeta"} <span>→</span></button></div></form></section></div>}
+
+    {deletingClient && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Eliminar cliente"><button className="modal-scrim" aria-label="Cancelar" onClick={() => setDeletingClient(null)}/><section className="delete-modal"><div className="delete-symbol">!</div><span className="modal-kicker">ELIMINAR CLIENTE</span><h2>¿Eliminar a {deletingClient.name}?</h2><p>Se eliminarán también sus asistencias y actividad. Esta acción no se puede deshacer.</p><div><button onClick={() => setDeletingClient(null)}>Cancelar</button><button className="delete-confirm" onClick={deleteClientRecord}>Eliminar definitivamente</button></div></section></div>}
 
     {cardOpen && cardClient && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Tarjeta digital"><button className="modal-scrim" aria-label="Cerrar" onClick={() => setCardOpen(false)}/><section className="card-modal"><header><div><span className="modal-kicker">TARJETA DIGITAL</span><h2>{cardClient.name}</h2></div><button className="close-button" onClick={() => setCardOpen(false)}>×</button></header><div className="digital-card" ref={cardRef}><div className="card-top"><div className="mini-brand"><b>M</b><span>MONSTER<br/><small>GYM OS</small></span></div><span className="card-tier">MEMBER</span></div><div className="card-person">{cardClient.photo ? <img className="card-photo card-photo-image" src={cardClient.photo} alt=""/> : <span className="card-photo">{initials(cardClient.name)}</span>}<div><small>MIEMBRO</small><strong>{cardClient.name}</strong><p>{cardClient.plan}</p><code>ID {cardClient.token.slice(0,8).toUpperCase()}</code></div></div><div className="card-bottom"><div className="card-loyalty"><small>FIDELIDAD · {cardClient.stamps}/10 SELLOS</small><div className="mini-stamps">{Array.from({length:10},(_,index)=>{ const visit = clientVisitHistory(cardClient)[index]; return <i key={index} className={index < cardClient.stamps ? "on" : ""} title={visit ? formatStampDateTime(visit) : "Pendiente"}>{index < cardClient.stamps ? "M" : ""}</i>; })}</div>{cardClient.lastVisit && <span className="card-last-stamp">Último sello · {formatStampDateTime(cardClient.lastVisit)}</span>}</div><div className="qr-code">{qrDataUrl && <img src={qrDataUrl} alt={`QR único de ${cardClient.name}`}/>}</div></div></div><p className="card-help">Escanea este QR desde el sistema para registrar una visita automáticamente. ID <strong>{cardClient.token.slice(0,8).toUpperCase()}</strong>.</p><div className="share-actions"><button className="download-button" onClick={downloadCard} disabled={downloadStatus === "working"}>{downloadStatus === "working" ? "Generando PNG…" : downloadStatus === "done" ? "✓ PNG descargado" : downloadStatus === "error" ? "Reintentar" : "↓ Descargar PNG"}</button><a className="whatsapp-button" target="_blank" rel="noreferrer" href={`https://wa.me/${cardClient.phone.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${cardClient.name}, tu tarjeta digital de Monster Gym está lista. Te enviaré la imagen a continuación.`)}`}>Abrir WhatsApp ↗</a></div></section></div>}
 
-    {scannerOpen && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Escáner QR"><button className="modal-scrim" aria-label="Cerrar" onClick={closeScanner}/><section className="scanner-modal"><header><div><span className="modal-kicker">RECEPCIÓN</span><h2>{scanStep === "success" ? "¡Visita registrada!" : scanStep === "found" ? "Cliente identificado" : scanStep === "missing" ? "Tarjeta no encontrada" : "Escanear tarjeta"}</h2></div><button className="close-button" onClick={closeScanner}>×</button></header>{scanStep === "camera" && <div className="camera-content"><div className="camera-view real-camera"><div id="qr-reader"/><div className="camera-tip">Centra el QR dentro del marco</div></div>{scanError && <p className="scan-error">{scanError}</p>}<form className="manual-scan" onSubmit={findManualClient}><input value={manualCode} onChange={(event) => setManualCode(event.target.value)} placeholder="Código corto o teléfono"/><button>Buscar</button></form><p className="privacy-note">La cámara solo funciona mientras esta ventana está abierta.</p></div>}{scanStep === "missing" && <div className="missing-state"><div className="missing-symbol">!</div><h3>Este cliente no está guardado en este dispositivo</h3><p>Abre el enlace con el celular donde registraste al cliente o usa el escáner del sistema en ese equipo.</p><button className="confirm-visit" onClick={closeScanner}>Entendido</button></div>}{scanStep === "found" && scannedClient && <div className="found-client"><div className="member-hero">{scannedClient.photo ? <img className="avatar found-avatar" src={scannedClient.photo} alt=""/> : <span className="avatar found-avatar">{initials(scannedClient.name)}</span>}<span className="verified">✓</span></div><span className="found-label">CLIENTE IDENTIFICADO</span><h3>{scannedClient.name}</h3><p>{scannedClient.plan} · Vigente hasta {formatDate(scannedClient.expiresAt)}</p><div className="stamp-progress"><div className="stamp-copy"><span>Tarjeta de fidelidad</span><strong>{scannedClient.stamps} de 10 sellos</strong></div><div className="stamps">{Array.from({length:10},(_,index)=>{ const visit = clientVisitHistory(scannedClient)[index]; return <i className={index < scannedClient.stamps ? "filled" : ""} key={index} title={visit ? formatStampDateTime(visit) : "Pendiente"}>{index < scannedClient.stamps ? "M" : ""}</i>; })}</div>{scannedClient.lastVisit && <small className="scan-last-stamp">Último sello · {formatStampDateTime(scannedClient.lastVisit)}</small>}</div><button className="confirm-visit" onClick={confirmVisit}>Confirmar visita <span>+1 sello</span></button><button className="text-action" onClick={() => {scanHandledRef.current=false;visitSubmittingRef.current=false;setScanStep("camera");setScannedClient(null);}}>Escanear otro código</button></div>}{scanStep === "success" && scannedClient && <div className="success-state"><div className="success-burst">✓</div><h3>{scannedClient.name} suma una visita</h3><p>Ahora tiene <strong>{scannedClient.stamps} de 10 sellos.</strong><br/><span className="success-time">Sello registrado: {formatStampDateTime(scannedClient.lastVisit ?? new Date().toISOString())}</span><br/>{scannedClient.stamps === 10 ? "¡Recompensa desbloqueada!" : `Le faltan ${10-scannedClient.stamps} para su recompensa.`}</p><div className="reward-chip"><span>✦</span><div><small>PRÓXIMA RECOMPENSA</small><strong>1 batido proteico gratis</strong></div></div><button className="confirm-visit" onClick={closeScanner}>Listo, continuar</button></div>}</section></div>}
+    {scannerOpen && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Escáner QR"><button className="modal-scrim" aria-label="Cerrar" onClick={closeScanner}/><section className="scanner-modal"><header><div><span className="modal-kicker">RECEPCIÓN</span><h2>{scanStep === "success" ? "¡Visita registrada!" : scanStep === "found" ? "Cliente identificado" : scanStep === "missing" ? "Tarjeta no encontrada" : "Escanear tarjeta"}</h2></div><button className="close-button" onClick={closeScanner}>×</button></header>{scanStep === "camera" && <div className="camera-content"><div className="camera-view real-camera"><div id="qr-reader"/><div className="camera-tip">Centra el QR dentro del marco</div></div>{scanError && <p className="scan-error">{scanError}</p>}<form className="manual-scan" onSubmit={findManualClient}><input value={manualCode} onChange={(event) => setManualCode(event.target.value)} placeholder="Código corto o teléfono"/><button>Buscar</button></form><p className="privacy-note">La cámara solo funciona mientras esta ventana está abierta.</p></div>}{scanStep === "missing" && <div className="missing-state"><div className="missing-symbol">!</div><h3>Cliente no encontrado en la base central</h3><p>Verifica que el QR corresponda a un cliente activo registrado en Monster Gym.</p><button className="confirm-visit" onClick={closeScanner}>Entendido</button></div>}{scanStep === "found" && scannedClient && <div className="found-client"><div className="member-hero">{scannedClient.photo ? <img className="avatar found-avatar" src={scannedClient.photo} alt=""/> : <span className="avatar found-avatar">{initials(scannedClient.name)}</span>}<span className="verified">✓</span></div><span className="found-label">CLIENTE IDENTIFICADO</span><h3>{scannedClient.name}</h3><p>{scannedClient.plan} · Vigente hasta {formatDate(scannedClient.expiresAt)}</p><div className="stamp-progress"><div className="stamp-copy"><span>Tarjeta de fidelidad</span><strong>{scannedClient.stamps} de 10 sellos</strong></div><div className="stamps">{Array.from({length:10},(_,index)=>{ const visit = clientVisitHistory(scannedClient)[index]; return <i className={index < scannedClient.stamps ? "filled" : ""} key={index} title={visit ? formatStampDateTime(visit) : "Pendiente"}>{index < scannedClient.stamps ? "M" : ""}</i>; })}</div>{scannedClient.lastVisit && <small className="scan-last-stamp">Último sello · {formatStampDateTime(scannedClient.lastVisit)}</small>}</div><button className="confirm-visit" onClick={confirmVisit}>Confirmar visita <span>+1 sello</span></button><button className="text-action" onClick={() => {scanHandledRef.current=false;visitSubmittingRef.current=false;setScanStep("camera");setScannedClient(null);}}>Escanear otro código</button></div>}{scanStep === "success" && scannedClient && <div className="success-state"><div className="success-burst">✓</div><h3>{scannedClient.name} suma una visita</h3><p>Ahora tiene <strong>{scannedClient.stamps} de 10 sellos.</strong><br/><span className="success-time">Sello registrado: {formatStampDateTime(scannedClient.lastVisit ?? new Date().toISOString())}</span><br/>{scannedClient.stamps === 10 ? "¡Recompensa desbloqueada!" : `Le faltan ${10-scannedClient.stamps} para su recompensa.`}</p><div className="reward-chip"><span>✦</span><div><small>PRÓXIMA RECOMPENSA</small><strong>1 batido proteico gratis</strong></div></div><button className="confirm-visit" onClick={closeScanner}>Listo, continuar</button></div>}</section></div>}
   </main>;
 }

@@ -51,3 +51,21 @@
 }
 
 @media(max-width:380px){.gym-status{font-size:10px}.digital-card{padding:15px}.card-person{gap:10px}.card-photo{width:50px;height:50px}.card-person strong{font-size:15px}.qr-code{width:72px;height:72px}.mini-stamps{grid-template-columns:repeat(5,18px);gap:4px}.mini-stamps i{width:18px;height:18px}.form-actions{grid-template-columns:1fr}.form-actions button{width:100%}}
+
+/* Central database, CRUD and native-like mobile client management */
+.central-loading,.central-error{margin:0 0 16px;border-radius:13px;padding:12px 14px;font-size:12px}.central-loading{background:#f0edff;color:#634ad1}.central-error{display:flex;align-items:center;gap:10px;background:#fff0ee;color:#9f443d;border:1px solid #ffd8d3}.central-error span{flex:1}.central-error button{border:0;border-radius:8px;background:#9f443d;color:#fff;padding:7px 10px;font-size:10px;font-weight:800}.compact-field{margin-top:0}.compact-field input{width:100%;height:42px;border:1px solid #e1dee5;border-radius:10px;padding:0 12px;font-size:13px;outline:0;background:#fff}.danger-action{color:#ad4c43!important;border-color:#f0c8c4!important;background:#fff7f6!important}.delete-modal{position:relative;width:min(92vw,430px);background:#fff;border-radius:22px;padding:30px;box-shadow:0 30px 90px #0007;text-align:center}.delete-symbol{width:62px;height:62px;border-radius:18px;margin:0 auto 15px;display:grid;place-items:center;background:#fff0ee;color:#ad4c43;font-size:28px;font-weight:950}.delete-modal h2{margin:7px 0 8px;font-size:22px}.delete-modal p{color:#807b87;font-size:12px;line-height:1.55;margin:0 0 22px}.delete-modal>div:last-child{display:grid;grid-template-columns:1fr 1.4fr;gap:9px}.delete-modal button{height:42px;border:1px solid #dedbe3;border-radius:10px;background:#fff;font-size:11px;font-weight:850}.delete-modal .delete-confirm{border-color:#ad4c43;background:#ad4c43;color:#fff}
+
+@media(max-width:760px){
+  .view-page{padding-bottom:78px}.view-heading{margin-bottom:18px}.view-heading h1{font-size:30px}.view-heading p{font-size:12px;line-height:1.45}
+  .list-toolbar{position:sticky;top:70px;z-index:10;border-radius:14px;padding:9px 10px;box-shadow:0 8px 25px #251e3308}.list-toolbar>span{display:none}.search-box{height:46px;border-radius:12px}
+  .clients-table{display:grid;gap:12px}.client-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px 10px;min-height:0;margin:0;padding:16px;border-radius:18px;box-shadow:0 8px 22px #201a2d0b}
+  .client-row .client-identity{grid-column:1/2}.client-identity>img,.client-identity>.avatar{width:52px;height:52px}.client-identity strong{font-size:15px}.client-identity small{font-size:11px}
+  .client-row>div:nth-child(2){grid-column:1/2;padding-left:64px;margin-top:-25px}.client-row>div:nth-child(2) strong{font-size:11px}.client-row>div:nth-child(2) small{font-size:9px}
+  .client-row>div:nth-child(3){grid-column:1/-1;background:#f7f5fa;border-radius:12px;padding:10px 11px}.client-row>div:nth-child(3) strong{font-size:11px}.row-progress{height:5px;margin-top:7px}
+  .client-row>.status-badge{grid-column:2;grid-row:1;align-self:start;justify-self:end;font-size:9px;padding:5px 8px}
+  .row-actions{grid-column:1/-1!important;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding-top:3px}.row-actions button{min-width:0;height:38px;padding:0 5px;font-size:9px;border-radius:10px}.row-actions button:last-child{grid-column:auto}
+  .page-action{position:fixed;right:16px;bottom:18px;z-index:18;width:56px!important;height:56px!important;padding:0!important;border-radius:18px!important;font-size:0!important;box-shadow:0 12px 28px #15131b42}.page-action::after{content:"+";font-size:28px;line-height:1;color:var(--lime)}
+  .client-modal,.scanner-modal,.card-modal{border-radius:22px 22px 0 0;max-height:calc(100dvh - 6px)}.client-modal form{padding-bottom:22px}.delete-modal{width:calc(100vw - 18px);border-radius:22px;padding:25px 20px;margin-bottom:4px}.delete-modal>div:last-child{grid-template-columns:1fr}.delete-modal button{height:46px}
+  .central-error{align-items:flex-start;flex-wrap:wrap}.central-error button{width:100%;height:38px}
+}
+@media(max-width:430px){.row-actions{grid-template-columns:1fr 1fr}.row-actions button{height:40px;font-size:10px}.client-row>div:nth-child(2){padding-left:62px}.field-grid{grid-template-columns:1fr}.delete-modal{padding:24px 18px}}

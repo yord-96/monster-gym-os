@@ -23,40 +23,31 @@ test("renderiza la aplicación Monster Gym", async () => {
   assert.match(html, /<title>Monster Gym OS — Gestión y fidelidad<\/title>/i);
   assert.match(html, /Registra una visita/);
   assert.match(html, /Nuevo cliente/);
-  assert.match(html, /MODO LOCAL/);
+  assert.match(html, /BASE CENTRAL/);
   assert.match(html, /Clientes/);
   assert.match(html, /Fidelidad/);
   assert.doesNotMatch(html, /codex-preview|Building your site/);
 });
 
-test("incluye persistencia, QR y descarga PNG reales", async () => {
+test("incluye base central, CRUD, QR y descarga PNG", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
 
-  assert.match(page, /localStorage\.getItem\(STORE_KEY\)/);
-  assert.match(page, /localStorage\.setItem\(STORE_KEY/);
-  assert.match(page, /crypto\.randomUUID\(\)/);
+  assert.doesNotMatch(page, /localStorage\.getItem|localStorage\.setItem/);
+  assert.match(page, /apiJson<.*>\("\/api\/state"/s);
+  assert.match(page, /method: "PUT"/);
+  assert.match(page, /method: "DELETE"/);
+  assert.match(page, /\/visit`/);
+  assert.match(page, /openEditClient/);
+  assert.match(page, /deleteClientRecord/);
+  assert.match(page, /BASE CENTRAL/);
   assert.match(page, /QRCode\.toDataURL/);
-  assert.match(page, /MEMBER_QUERY_KEY = "checkin"/);
-  assert.match(page, /memberQrValue\(client\.token\)/);
   assert.match(page, /MONSTER-GYM:/);
-  assert.match(page, /tokenFromQr\(decoded\)/);
-  assert.match(page, /visitHistory:/);
-  assert.match(page, /formatStampDateTime/);
-  assert.match(page, /toPng\(cardRef\.current/);
-  assert.match(page, /new Html5Qrcode\("qr-reader",/);
-  assert.match(page, /Html5QrcodeSupportedFormats\.QR_CODE/);
-  assert.match(page, /setClients\(\(current\) => \[record, \.\.\.current\]\)/);
-  assert.match(page, /registerVisitForClient/);
-  assert.match(page, /visits: client\.visits \+ 1/);
-  assert.match(page, /scanHandledRef\.current/);
-  assert.match(page, /visitSubmittingRef\.current/);
   assert.match(page, /pixelRatio: 3/);
-  assert.match(page, /The scanner may already be stopped after a successful read/);
-  assert.match(page, /Ignore cleanup races while React is unmounting the camera/);
-  assert.match(css, /\.clients-table/);
-  assert.match(css, /\.real-camera/);
+  assert.match(server, /node:http/);
+  assert.match(server, /\/api\/state/);
+  assert.match(css, /\.danger-action/);
   assert.match(css, /@media\(max-width:760px\)/);
-  assert.match(css, /\.top-actions \.primary-button/);
-  assert.match(css, /\.card-last-stamp/);
+  assert.match(css, /\.row-actions/);
 });

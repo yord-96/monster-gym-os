@@ -8,10 +8,12 @@
   "scripts": {
     "dev": "vinext dev",
     "build": "vinext build",
-    "start": "vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "start": "node server.mjs",
+    "test": "npm run build && node --test tests/rendered-html.test.mjs tests/database.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "app:start": "vinext start",
+    "db:init": "node scripts/init-db.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

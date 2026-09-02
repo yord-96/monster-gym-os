@@ -52,6 +52,8 @@ test("incluye persistencia, QR y descarga PNG reales", async () => {
   assert.match(page, /scanHandledRef\.current/);
   assert.match(page, /visitSubmittingRef\.current/);
   assert.match(page, /pixelRatio: 3/);
+  assert.match(page, /The scanner may already be stopped after a successful read/);
+  assert.match(page, /Ignore cleanup races while React is unmounting the camera/);
   assert.match(css, /\.clients-table/);
   assert.match(css, /\.real-camera/);
   assert.match(css, /@media\(max-width:760px\)/);

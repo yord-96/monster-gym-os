@@ -222,7 +222,20 @@ export default function Home() {
       window.clearTimeout(timer);
       const active = scannerRef.current;
       scannerRef.current = null;
-      if (active) active.stop().then(() => active.clear()).catch(() => undefined);
+      if (active) {
+        void (async () => {
+          try {
+            await active.stop();
+          } catch {
+            // The scanner may already be stopped after a successful read.
+          }
+          try {
+            await active.clear();
+          } catch {
+            // Ignore cleanup races while React is unmounting the camera.
+          }
+        })();
+      }
     };
   }, [scannerOpen, scanStep, clients, registerVisitForClient]);
 

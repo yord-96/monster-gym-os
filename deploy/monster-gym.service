@@ -10,6 +10,7 @@ Group=yordy
 WorkingDirectory=/var/www/monster-gym-os
 Environment=NODE_ENV=production
 Environment=PORT=4100
+EnvironmentFile=-/etc/monster-gym.env
 ExecStart=/usr/bin/npm start
 Restart=on-failure
 RestartSec=5

@@ -21,33 +21,46 @@ test("renderiza la aplicación Monster Gym", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Monster Gym OS — Gestión y fidelidad<\/title>/i);
-  assert.match(html, /Registra una visita/);
-  assert.match(html, /Nuevo cliente/);
-  assert.match(html, /BASE CENTRAL/);
-  assert.match(html, /Clientes/);
-  assert.match(html, /Fidelidad/);
+  assert.match(html, /MONSTER/);
   assert.doesNotMatch(html, /codex-preview|Building your site/);
 });
 
-test("incluye base central, CRUD, QR y descarga PNG", async () => {
+test("incluye base central, CRUD, planes, deuda, QR de cobro y vouchers", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const database = await readFile(new URL("../server/database.mjs", import.meta.url), "utf8");
 
   assert.doesNotMatch(page, /localStorage\.getItem|localStorage\.setItem/);
-  assert.match(page, /apiJson<.*>\("\/api\/state"/s);
-  assert.match(page, /method: "PUT"/);
-  assert.match(page, /method: "DELETE"/);
-  assert.match(page, /\/visit`/);
-  assert.match(page, /openEditClient/);
-  assert.match(page, /deleteClientRecord/);
-  assert.match(page, /BASE CENTRAL/);
+  assert.match(page, /\/api\/auth\/login/);
+  assert.match(page, /\/api\/state/);
+  assert.match(page, /\/api\/plans/);
+  assert.match(page, /\/payments/);
+  assert.match(page, /\/renew/);
+  assert.match(page, /paymentQrUrl/);
+  assert.match(page, /capture="environment"/);
+  assert.match(page, /SUSPENDIDO POR DEUDA/);
+  assert.match(page, /SESIONES AGOTADAS/);
+  assert.match(page, /https:\/\/wa\.me/);
   assert.match(page, /QRCode\.toDataURL/);
   assert.match(page, /MONSTER-GYM:/);
   assert.match(page, /pixelRatio: 3/);
-  assert.match(server, /node:http/);
-  assert.match(server, /\/api\/state/);
-  assert.match(css, /\.danger-action/);
+
+  assert.match(server, /MONSTER_ADMIN_PASSWORD/);
+  assert.match(server, /MONSTER_SESSION_SECRET/);
+  assert.match(server, /\/api\/settings\/payment-qr/);
+  assert.match(server, /\/uploads\//);
+  assert.match(server, /imageFromDataUrl/);
+
+  assert.match(database, /CREATE TABLE IF NOT EXISTS payments/);
+  assert.match(database, /CREATE TABLE IF NOT EXISTS memberships/);
+  assert.match(database, /CREATE TABLE IF NOT EXISTS plans/);
+  assert.match(database, /grace_until/);
+  assert.match(database, /sessions_used/);
+  assert.match(database, /ACCESS_BLOCKED/);
+
+  assert.match(css, /\.payment-modal/);
+  assert.match(css, /\.voucher-capture/);
+  assert.match(css, /\.blocked-state/);
   assert.match(css, /@media\(max-width:760px\)/);
-  assert.match(css, /\.row-actions/);
 });

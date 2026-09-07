@@ -4,8 +4,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import QRCode from "qrcode";
 
-type View = "inicio" | "clientes" | "planes" | "fidelidad" | "asistencias" | "reportes";
-type ScanStep = "camera" | "found" | "success" | "missing";
+type View = "inicio" | "clientes" | "planes" | "fidelidad" | "asistencias" | "cobros" | "reportes";
+type ScanStep = "camera" | "found" | "success" | "missing" | "blocked";
+type PaymentMethod = "cash" | "qr";
+type AccessStatus = "active" | "expired" | "debt_suspended" | "manual_suspended" | "sessions_exhausted";
+type PaymentStatus = "paid" | "partial" | "due";
+
+type PlanRecord = {
+  id: string;
+  name: string;
+  price: number;
+  billingType: "unlimited" | "sessions";
+  sessionLimit: number | null;
+  durationMonths: number;
+  active: boolean;
+  sortOrder: number;
+};
 
 type ClientRecord = {
   id: string;
@@ -13,6 +27,7 @@ type ClientRecord = {
   name: string;
   phone: string;
   plan: string;
+  planId: string;
   photo: string;
   createdAt: string;
   expiresAt: string;
@@ -20,6 +35,18 @@ type ClientRecord = {
   stamps: number;
   lastVisit?: string;
   visitHistory?: string[];
+  membershipId: string;
+  membershipStartedAt: string;
+  membershipPrice: number;
+  paidAmount: number;
+  balance: number;
+  paymentStatus: PaymentStatus;
+  graceUntil: string;
+  sessionLimit: number | null;
+  sessionsUsed: number;
+  manualSuspended: boolean;
+  accessStatus: AccessStatus;
+  accessReason: string;
 };
 
 type ActivityRecord = {
@@ -31,16 +58,25 @@ type ActivityRecord = {
   createdAt: string;
 };
 
+type PaymentRecord = {
+  id: string;
+  clientId: string;
+  membershipId: string;
+  amount: number;
+  method: PaymentMethod;
+  voucherUrl: string;
+  note: string;
+  createdAt: string;
+};
+
+type AppSettings = { paymentQrUrl: string };
+
 const MEMBER_QUERY_KEY = "checkin";
-const plans = [
-  { name: "Plan Fuerza · Mensual", duration: 30, price: "Bs 180", tone: "purple" },
-  { name: "Plan Elite · Trimestral", duration: 90, price: "Bs 480", tone: "lime" },
-  { name: "Plan Monster · Anual", duration: 365, price: "Bs 1.650", tone: "coral" },
-];
 
 const initials = (name: string) => name.split(" ").filter(Boolean).map((word) => word[0]).join("").slice(0, 2).toUpperCase() || "MG";
-const formatDate = (value: string) => new Intl.DateTimeFormat("es-BO", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
-const formatStampDateTime = (value: string) => new Intl.DateTimeFormat("es-BO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+const money = (value: number) => new Intl.NumberFormat("es-BO", { style: "currency", currency: "BOB", minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value).replace("BOB", "Bs");
+const formatDate = (value: string) => value ? new Intl.DateTimeFormat("es-BO", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value)) : "—";
+const formatDateTime = (value: string) => value ? new Intl.DateTimeFormat("es-BO", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)) : "—";
 const isToday = (value: string) => new Date(value).toDateString() === new Date().toDateString();
 const memberQrValue = (token: string) => `MONSTER-GYM:${token}`;
 const tokenFromQr = (value: string) => {
@@ -55,64 +91,117 @@ const tokenFromQr = (value: string) => {
   }
 };
 const clientVisitHistory = (client: ClientRecord) => client.visitHistory ?? (client.lastVisit ? [client.lastVisit] : []);
+const todayInput = () => new Date().toISOString().slice(0, 10);
 
-const planExpiryInput = (planName: string) => {
-  const plan = plans.find((item) => item.name === planName) ?? plans[0];
-  const value = new Date();
-  value.setDate(value.getDate() + plan.duration);
-  return value.toISOString().slice(0, 10);
-};
-const expiryIsoFromInput = (value: string) => new Date(`${value}T23:59:59`).toISOString();
+class ApiError extends Error {
+  status: number;
+  payload: Record<string, unknown>;
+  constructor(message: string, status: number, payload: Record<string, unknown>) {
+    super(message);
+    this.status = status;
+    this.payload = payload;
+  }
+}
 
 async function apiJson<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...options,
     headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
     cache: "no-store",
+    credentials: "same-origin",
   });
-  const payload = await response.json().catch(() => ({})) as { error?: string } & T;
-  if (!response.ok) throw new Error(payload.error || `Error ${response.status}`);
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown> & T;
+  if (!response.ok) throw new ApiError(String(payload.error || `Error ${response.status}`), response.status, payload);
   return payload;
 }
 
-const Icon = ({ children }: { children: React.ReactNode }) => <span className="nav-icon" aria-hidden="true">{children}</span>;
+async function imageFileToDataUrl(file: File, maxSide = 1600, quality = 0.86, square = false): Promise<string> {
+  if (file.size > 8 * 1024 * 1024) throw new Error("La imagen no puede superar 8 MB.");
+  const source = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("No se pudo leer la imagen."));
+    reader.readAsDataURL(file);
+  });
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const value = new Image();
+    value.onload = () => resolve(value);
+    value.onerror = () => reject(new Error("La imagen no es válida."));
+    value.src = source;
+  });
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("No se pudo procesar la imagen.");
+
+  if (square) {
+    const size = Math.min(maxSide, 640);
+    canvas.width = size;
+    canvas.height = size;
+    const scale = Math.max(size / image.width, size / image.height);
+    const width = image.width * scale;
+    const height = image.height * scale;
+    context.drawImage(image, (size - width) / 2, (size - height) / 2, width, height);
+  } else {
+    const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+    canvas.width = Math.round(image.width * scale);
+    canvas.height = Math.round(image.height * scale);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  }
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+const accessLabel = (client: ClientRecord) => {
+  switch (client.accessStatus) {
+    case "active": return "ACTIVO";
+    case "expired": return "VENCIDO";
+    case "debt_suspended": return "SUSPENDIDO POR DEUDA";
+    case "manual_suspended": return "SUSPENDIDO";
+    case "sessions_exhausted": return "SESIONES AGOTADAS";
+  }
+};
+
+const paymentLabel = (client: ClientRecord) => client.paymentStatus === "paid" ? "PAGADO" : client.paymentStatus === "partial" ? "PAGO PARCIAL" : "DEBE";
+
+function ClientAvatar({ client, className = "" }: { client: ClientRecord; className?: string }) {
+  return client.photo
+    ? <img className={className} src={client.photo} alt={`Foto de ${client.name}`}/>
+    : <span className={`avatar violet ${className}`}>{initials(client.name)}</span>;
+}
 
 function LoyaltyGalleryCard({ client, onOpen, onVisit }: { client: ClientRecord; onOpen: (client: ClientRecord) => void; onVisit: (client: ClientRecord) => void }) {
   const [qr, setQr] = useState("");
-
   useEffect(() => {
     let active = true;
-    QRCode.toDataURL(memberQrValue(client.token), {
-      errorCorrectionLevel: "M",
-      width: 640,
-      margin: 4,
-      color: { dark: "#17141f", light: "#ffffff" },
-    }).then((value) => { if (active) setQr(value); });
+    QRCode.toDataURL(memberQrValue(client.token), { errorCorrectionLevel: "M", width: 640, margin: 4, color: { dark: "#17141f", light: "#ffffff" } })
+      .then((value) => { if (active) setQr(value); });
     return () => { active = false; };
   }, [client.token]);
-
-  const valid = new Date(client.expiresAt) >= new Date();
 
   return <article className="loyalty-gallery-card">
     <div className="loyalty-card-visual">
       <div className="gallery-card-top">
         <div className="mini-brand"><b>M</b><span>MONSTER<br/><small>GYM OS</small></span></div>
-        <span className={`gallery-status ${valid ? "active" : "expired"}`}>{valid ? "ACTIVO" : "VENCIDO"}</span>
+        <span className={`gallery-status ${client.accessStatus === "active" ? "active" : "expired"}`}>{accessLabel(client)}</span>
       </div>
       <div className="gallery-card-member">
-        {client.photo ? <img src={client.photo} alt={`Foto de ${client.name}`}/> : <span>{initials(client.name)}</span>}
+        <ClientAvatar client={client}/>
         <div><small>MIEMBRO</small><strong>{client.name}</strong><p>{client.plan}</p><code>ID {client.token.slice(0,8).toUpperCase()}</code></div>
       </div>
       <div className="gallery-card-bottom">
         <div className="gallery-loyalty">
           <div><small>FIDELIDAD</small><strong>{client.stamps}/10 sellos</strong></div>
-          <div className="gallery-stamps">{Array.from({ length: 10 }, (_, index) => { const visit = clientVisitHistory(client)[index]; return <i className={index < client.stamps ? "filled" : ""} key={index} title={visit ? `Sello ${index + 1}: ${formatStampDateTime(visit)}` : `Sello ${index + 1} pendiente`} aria-label={visit ? `Sello ${index + 1}, ${formatStampDateTime(visit)}` : `Sello ${index + 1} pendiente`}>{index < client.stamps ? "M" : ""}</i>; })}</div>
-          {client.lastVisit && <span className="gallery-last-stamp">Último sello · {formatStampDateTime(client.lastVisit)}</span>}
+          <div className="gallery-stamps">{Array.from({ length: 10 }, (_, index) => {
+            const visit = clientVisitHistory(client)[index];
+            return <i className={index < client.stamps ? "filled" : ""} key={index} title={visit ? `Sello ${index + 1}: ${formatDateTime(visit)}` : `Sello ${index + 1} pendiente`}>{index < client.stamps ? "M" : ""}</i>;
+          })}</div>
         </div>
         <div className="gallery-qr">{qr ? <img src={qr} alt={`QR único de ${client.name}`}/> : <span>QR</span>}</div>
       </div>
     </div>
-    <div className="gallery-card-info"><div><strong>{client.visits} visita{client.visits === 1 ? "" : "s"}</strong><span>{client.stamps === 10 ? "Recompensa disponible" : `Faltan ${10-client.stamps} sellos`}</span></div><div className="gallery-card-actions"><button onClick={() => onOpen(client)}>Ver tarjeta</button><button onClick={() => onVisit(client)}>＋ Visita</button></div></div>
+    <div className="gallery-card-info">
+      <div><strong>{client.visits} visita{client.visits === 1 ? "" : "s"}</strong><span>{client.sessionLimit ? `${client.sessionsUsed}/${client.sessionLimit} sesiones` : `${client.stamps}/10 sellos`}</span></div>
+      <div className="gallery-card-actions"><button onClick={() => onOpen(client)}>Ver tarjeta</button><button onClick={() => onVisit(client)} disabled={client.accessStatus !== "active"}>＋ Visita</button></div>
+    </div>
   </article>;
 }
 
@@ -120,19 +209,46 @@ export default function Home() {
   const [view, setView] = useState<View>("inicio");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [authState, setAuthState] = useState<"checking" | "login" | "authenticated">("checking");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loginBusy, setLoginBusy] = useState(false);
+
   const [centralLoaded, setCentralLoaded] = useState(false);
   const [centralError, setCentralError] = useState("");
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [activities, setActivities] = useState<ActivityRecord[]>([]);
+  const [plans, setPlans] = useState<PlanRecord[]>([]);
+  const [settings, setSettings] = useState<AppSettings>({ paymentQrUrl: "" });
   const [search, setSearch] = useState("");
 
   const [clientOpen, setClientOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<ClientRecord | null>(null);
   const [deletingClient, setDeletingClient] = useState<ClientRecord | null>(null);
-  const [clientForm, setClientForm] = useState({ name: "", phone: "", plan: plans[0].name, expiresAt: planExpiryInput(plans[0].name) });
+  const [clientForm, setClientForm] = useState({ name: "", phone: "", planId: "", startsAt: todayInput(), manualSuspended: false });
   const [photoUrl, setPhotoUrl] = useState("");
   const [formError, setFormError] = useState("");
   const [clientSaving, setClientSaving] = useState(false);
+
+  const [renewingClient, setRenewingClient] = useState<ClientRecord | null>(null);
+  const [renewForm, setRenewForm] = useState({ planId: "", startsAt: todayInput() });
+  const [renewBusy, setRenewBusy] = useState(false);
+
+  const [paymentClient, setPaymentClient] = useState<ClientRecord | null>(null);
+  const [paymentForm, setPaymentForm] = useState({ amount: "", method: "qr" as PaymentMethod, note: "" });
+  const [voucherImage, setVoucherImage] = useState("");
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
+
+  const [planOpen, setPlanOpen] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<PlanRecord | null>(null);
+  const [planForm, setPlanForm] = useState({ name: "", price: "", billingType: "unlimited" as "unlimited" | "sessions", sessionLimit: "12", durationMonths: "1", active: true });
+  const [planError, setPlanError] = useState("");
+  const [planBusy, setPlanBusy] = useState(false);
+
+  const [qrSaving, setQrSaving] = useState(false);
+  const [qrError, setQrError] = useState("");
 
   const [cardOpen, setCardOpen] = useState(false);
   const [cardClient, setCardClient] = useState<ClientRecord | null>(null);
@@ -150,14 +266,29 @@ export default function Home() {
   const scanHandledRef = useRef(false);
   const visitSubmittingRef = useRef(false);
 
+  const activePlans = useMemo(() => plans.filter((plan) => plan.active), [plans]);
+
+  const replaceClient = useCallback((client: ClientRecord) => {
+    setClients((current) => current.map((item) => item.id === client.id ? client : item));
+    setCardClient((current) => current?.id === client.id ? client : current);
+    setPaymentClient((current) => current?.id === client.id ? client : current);
+    setScannedClient((current) => current?.id === client.id ? client : current);
+  }, []);
+
   const loadCentralState = useCallback(async (silent = false) => {
     try {
-      const data = await apiJson<{ clients: ClientRecord[]; activities: ActivityRecord[] }>("/api/state");
-      setClients((data.clients ?? []).map((client) => ({ ...client, visitHistory: clientVisitHistory(client) })));
+      const data = await apiJson<{ clients: ClientRecord[]; activities: ActivityRecord[]; plans: PlanRecord[]; settings: AppSettings }>("/api/state");
+      setClients(data.clients ?? []);
       setActivities(data.activities ?? []);
+      setPlans(data.plans ?? []);
+      setSettings(data.settings ?? { paymentQrUrl: "" });
       setCentralLoaded(true);
       setCentralError("");
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setAuthState("login");
+        return;
+      }
       if (!silent) setCentralError(error instanceof Error ? error.message : "No se pudo conectar con la base central.");
     }
   }, []);
@@ -167,25 +298,31 @@ export default function Home() {
     visitSubmittingRef.current = true;
     try {
       const result = await apiJson<{ client: ClientRecord; activity: ActivityRecord }>(`/api/clients/${encodeURIComponent(client.id)}/visit`, { method: "POST" });
-      setClients((current) => current.map((item) => item.id === result.client.id ? result.client : item));
+      replaceClient(result.client);
       setActivities((current) => [result.activity, ...current]);
       setScannedClient(result.client);
       setScanStep("success");
-      setCentralError("");
+      setScanError("");
     } catch (error) {
       visitSubmittingRef.current = false;
+      if (error instanceof ApiError && error.status === 409) {
+        const blocked = error.payload.client as ClientRecord | undefined;
+        if (blocked) { replaceClient(blocked); setScannedClient(blocked); }
+        setScanError(error.message);
+        setScanStep("blocked");
+        return;
+      }
       setScanError(error instanceof Error ? error.message : "No se pudo registrar la visita.");
     }
-  }, []);
+  }, [replaceClient]);
 
   useEffect(() => {
     const updateView = () => {
       const next = location.hash.replace("#", "") as View;
-      setView(["inicio", "clientes", "planes", "fidelidad", "asistencias", "reportes"].includes(next) ? next : "inicio");
+      setView(["inicio", "clientes", "planes", "fidelidad", "asistencias", "cobros", "reportes"].includes(next) ? next : "inicio");
     };
     updateView();
     addEventListener("hashchange", updateView);
-    // This one-time hydration flag intentionally initializes client-side state after mount.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setHydrated(true);
     return () => removeEventListener("hashchange", updateView);
@@ -193,14 +330,21 @@ export default function Home() {
 
   useEffect(() => {
     if (!hydrated) return;
-    // Initial synchronization intentionally loads the central server state after hydration.
+    void apiJson<{ authenticated: boolean }>("/api/auth/me")
+      .then((result) => setAuthState(result.authenticated ? "authenticated" : "login"))
+      .catch(() => setAuthState("login"));
+  }, [hydrated]);
+
+  useEffect(() => {
+    if (authState !== "authenticated") return;
+    // Initial synchronization intentionally hydrates central server state after authentication.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadCentralState();
     const refresh = () => { if (document.visibilityState === "visible") void loadCentralState(true); };
     const timer = window.setInterval(() => { if (document.visibilityState === "visible") void loadCentralState(true); }, 5000);
     document.addEventListener("visibilitychange", refresh);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
-  }, [hydrated, loadCentralState]);
+  }, [authState, loadCentralState]);
 
   useEffect(() => {
     if (!centralLoaded || checkInHandledRef.current) return;
@@ -209,12 +353,9 @@ export default function Home() {
     checkInHandledRef.current = true;
     const found = clients.find((item) => item.token === token || item.token.startsWith(token));
     history.replaceState({}, "", `${location.pathname}${location.hash}`);
-    // Legacy URL check-in intentionally opens the scanner result from the URL state.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setScannedClient(found ?? null);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setScanStep(found ? "found" : "missing");
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setScanStep(found ? (found.accessStatus === "active" ? "found" : "blocked") : "missing");
     setScannerOpen(true);
   }, [clients, centralLoaded]);
 
@@ -225,20 +366,13 @@ export default function Home() {
       try {
         const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode");
         if (cancelled || !document.getElementById("qr-reader")) return;
-        const instance = new Html5Qrcode("qr-reader", {
-          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-          useBarCodeDetectorIfSupported: true,
-        });
+        const instance = new Html5Qrcode("qr-reader", { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], useBarCodeDetectorIfSupported: true });
         scannerRef.current = instance;
         await instance.start(
           { facingMode: "environment" },
           {
-            fps: 15,
-            aspectRatio: 1,
-            qrbox: (viewfinderWidth, viewfinderHeight) => {
-              const size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.78);
-              return { width: size, height: size };
-            },
+            fps: 15, aspectRatio: 1,
+            qrbox: (width, height) => { const size = Math.floor(Math.min(width, height) * 0.78); return { width: size, height: size }; },
           },
           async (decoded) => {
             if (scanHandledRef.current) return;
@@ -246,8 +380,10 @@ export default function Home() {
             const found = clients.find((item) => item.token === token || item.token.startsWith(token.replace(/^ID\s*/i, "")));
             if (!found) { setScanError("El QR no pertenece a un cliente registrado en Monster Gym."); return; }
             scanHandledRef.current = true;
-            try { await instance.stop(); await instance.clear(); } catch { /* already stopped */ }
-            registerVisitForClient(found);
+            try { await instance.stop(); } catch { /* scanner may already be stopped */ }
+            try { await instance.clear(); } catch { /* scanner may already be cleared */ }
+            setScannedClient(found);
+            setScanStep(found.accessStatus === "active" ? "found" : "blocked");
           },
           () => undefined,
         );
@@ -261,14 +397,25 @@ export default function Home() {
       window.clearTimeout(timer);
       const active = scannerRef.current;
       scannerRef.current = null;
-      if (active) {
-        void (async () => {
-          try { await active.stop(); } catch { /* already stopped */ }
-          try { await active.clear(); } catch { /* already cleared */ }
-        })();
-      }
+      if (active) void (async () => { try { await active.stop(); } catch { /* scanner may already be stopped */ } try { await active.clear(); } catch { /* scanner may already be cleared */ } })();
     };
-  }, [scannerOpen, scanStep, clients, registerVisitForClient]);
+  }, [scannerOpen, scanStep, clients]);
+
+  const login = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoginBusy(true); setLoginError("");
+    try {
+      await apiJson("/api/auth/login", { method: "POST", body: JSON.stringify({ password: loginPassword }) });
+      setAuthState("authenticated"); setLoginPassword(""); setCentralLoaded(false);
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : "No se pudo iniciar sesión.");
+    } finally { setLoginBusy(false); }
+  };
+
+  const logout = async () => {
+    try { await apiJson("/api/auth/logout", { method: "POST" }); } catch { /* local logout still continues */ }
+    setAuthState("login"); setCentralLoaded(false); setClients([]); setActivities([]);
+  };
 
   const go = (next: View) => {
     location.hash = next;
@@ -277,121 +424,158 @@ export default function Home() {
   };
 
   const openNewClient = () => {
+    const first = activePlans[0];
     setEditingClient(null);
-    setClientForm({ name: "", phone: "", plan: plans[0].name, expiresAt: planExpiryInput(plans[0].name) });
-    setPhotoUrl("");
-    setFormError("");
-    setClientOpen(true);
+    setClientForm({ name: "", phone: "", planId: first?.id ?? "", startsAt: todayInput(), manualSuspended: false });
+    setPhotoUrl(""); setFormError(""); setClientOpen(true);
   };
 
   const openEditClient = (client: ClientRecord) => {
     setEditingClient(client);
-    setClientForm({ name: client.name, phone: client.phone, plan: client.plan, expiresAt: client.expiresAt.slice(0, 10) });
-    setPhotoUrl(client.photo);
-    setFormError("");
-    setClientOpen(true);
+    setClientForm({ name: client.name, phone: client.phone, planId: client.planId, startsAt: client.membershipStartedAt.slice(0,10), manualSuspended: client.manualSuspended });
+    setPhotoUrl(client.photo); setFormError(""); setClientOpen(true);
   };
 
-  const handlePhoto = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhoto = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { setFormError("La fotografía no puede superar 5 MB."); return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const image = new Image();
-      image.onload = () => {
-        const size = 420;
-        const canvas = document.createElement("canvas");
-        canvas.width = size; canvas.height = size;
-        const context = canvas.getContext("2d");
-        if (!context) return;
-        const scale = Math.max(size / image.width, size / image.height);
-        context.drawImage(image, (size - image.width * scale) / 2, (size - image.height * scale) / 2, image.width * scale, image.height * scale);
-        setPhotoUrl(canvas.toDataURL("image/jpeg", 0.82));
-        setFormError("");
-      };
-      image.src = String(reader.result);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const showCard = async (record: ClientRecord) => {
-    const qr = await QRCode.toDataURL(memberQrValue(record.token), { errorCorrectionLevel: "M", width: 1024, margin: 4, color: { dark: "#17141f", light: "#ffffff" } });
-    setCardClient(record);
-    setQrDataUrl(qr);
-    setDownloadStatus("idle");
-    setCardOpen(true);
+    try { setPhotoUrl(await imageFileToDataUrl(file, 640, 0.84, true)); setFormError(""); }
+    catch (error) { setFormError(error instanceof Error ? error.message : "No se pudo procesar la foto."); }
   };
 
   const saveClient = async (event: React.FormEvent) => {
     event.preventDefault();
     const name = clientForm.name.trim();
     const phone = clientForm.phone.trim();
-    if (!name || !phone || !clientForm.expiresAt) { setFormError("Completa nombre, WhatsApp y vencimiento."); return; }
-    setClientSaving(true);
-    setFormError("");
+    if (!name || !phone || (!editingClient && !clientForm.planId)) { setFormError("Completa nombre, WhatsApp y plan."); return; }
+    setClientSaving(true); setFormError("");
     try {
-      const body = JSON.stringify({ name, phone, plan: clientForm.plan, photo: photoUrl, expiresAt: expiryIsoFromInput(clientForm.expiresAt) });
       if (editingClient) {
-        const result = await apiJson<{ client: ClientRecord }>(`/api/clients/${encodeURIComponent(editingClient.id)}`, { method: "PUT", body });
-        setClients((current) => current.map((item) => item.id === result.client.id ? result.client : item));
-        setCardClient((current) => current?.id === result.client.id ? result.client : current);
-        setClientOpen(false);
+        const result = await apiJson<{ client: ClientRecord }>(`/api/clients/${encodeURIComponent(editingClient.id)}`, {
+          method: "PUT",
+          body: JSON.stringify({ name, phone, photo: photoUrl, manualSuspended: clientForm.manualSuspended }),
+        });
+        replaceClient(result.client);
       } else {
-        const result = await apiJson<{ client: ClientRecord; activity: ActivityRecord }>("/api/clients", { method: "POST", body });
+        const result = await apiJson<{ client: ClientRecord; activity: ActivityRecord }>("/api/clients", {
+          method: "POST",
+          body: JSON.stringify({ name, phone, planId: clientForm.planId, startsAt: `${clientForm.startsAt}T12:00:00Z`, photo: photoUrl }),
+        });
         setClients((current) => [result.client, ...current]);
         setActivities((current) => [result.activity, ...current]);
-        setClientOpen(false);
         await showCard(result.client);
       }
-      setCentralError("");
-    } catch (error) {
-      setFormError(error instanceof Error ? error.message : "No se pudo guardar el cliente.");
-    } finally {
-      setClientSaving(false);
-    }
+      setClientOpen(false);
+    } catch (error) { setFormError(error instanceof Error ? error.message : "No se pudo guardar el cliente."); }
+    finally { setClientSaving(false); }
   };
 
   const deleteClientRecord = async () => {
     if (!deletingClient) return;
     const target = deletingClient;
     try {
-      await apiJson<{ ok: boolean }>(`/api/clients/${encodeURIComponent(target.id)}`, { method: "DELETE" });
+      await apiJson(`/api/clients/${encodeURIComponent(target.id)}`, { method: "DELETE" });
       setClients((current) => current.filter((item) => item.id !== target.id));
       setActivities((current) => current.filter((item) => item.clientId !== target.id));
-      if (cardClient?.id === target.id) setCardOpen(false);
       setDeletingClient(null);
-      setCentralError("");
-    } catch (error) {
-      setCentralError(error instanceof Error ? error.message : "No se pudo eliminar el cliente.");
-    }
+    } catch (error) { setCentralError(error instanceof Error ? error.message : "No se pudo eliminar el cliente."); }
   };
 
-  const openScanner = () => {
-    scanHandledRef.current = false;
-    visitSubmittingRef.current = false;
-    setScanStep("camera"); setScannedClient(null); setScanError(""); setManualCode(""); setScannerOpen(true);
+  const openRenew = (client: ClientRecord) => {
+    setRenewingClient(client);
+    setRenewForm({ planId: client.planId || activePlans[0]?.id || "", startsAt: todayInput() });
   };
 
-  const closeScanner = () => {
-    scanHandledRef.current = false;
-    visitSubmittingRef.current = false;
-    setScannerOpen(false); setScannedClient(null); setScanError("");
-  };
-
-  const findManualClient = (event: React.FormEvent) => {
+  const renewClient = async (event: React.FormEvent) => {
     event.preventDefault();
-    const code = tokenFromQr(manualCode);
-    if (!code) { setScanError("Ingresa el código corto o el teléfono del cliente."); return; }
-    const found = clients.find((item) => item.token === code || item.token.startsWith(code) || item.phone.includes(code));
-    if (!found) { setScanError("No encontramos un cliente con ese código o teléfono."); return; }
-    visitSubmittingRef.current = false;
-    setScannedClient(found); setScanStep("found"); setScanError("");
+    if (!renewingClient) return;
+    setRenewBusy(true);
+    try {
+      const result = await apiJson<{ client: ClientRecord }>(`/api/clients/${encodeURIComponent(renewingClient.id)}/renew`, {
+        method: "POST",
+        body: JSON.stringify({ planId: renewForm.planId, startsAt: `${renewForm.startsAt}T12:00:00Z` }),
+      });
+      replaceClient(result.client); setRenewingClient(null);
+    } catch (error) { setCentralError(error instanceof Error ? error.message : "No se pudo renovar."); }
+    finally { setRenewBusy(false); }
   };
 
-  const confirmVisit = () => {
-    if (!scannedClient) return;
-    registerVisitForClient(scannedClient);
+  const openPayment = async (client: ClientRecord) => {
+    setPaymentClient(client);
+    setPaymentForm({ amount: client.balance > 0 ? String(client.balance) : "", method: "qr", note: "" });
+    setVoucherImage(""); setPaymentError(""); setPayments([]);
+    try {
+      const result = await apiJson<{ payments: PaymentRecord[] }>(`/api/clients/${encodeURIComponent(client.id)}/payments`);
+      setPayments(result.payments ?? []);
+    } catch (error) { setPaymentError(error instanceof Error ? error.message : "No se pudo cargar el historial."); }
+  };
+
+  const handleVoucher = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try { setVoucherImage(await imageFileToDataUrl(file, 1800, 0.88, false)); setPaymentError(""); }
+    catch (error) { setPaymentError(error instanceof Error ? error.message : "No se pudo procesar el voucher."); }
+  };
+
+  const registerPaymentRecord = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!paymentClient) return;
+    setPaymentBusy(true); setPaymentError("");
+    try {
+      const result = await apiJson<{ client: ClientRecord; payment: PaymentRecord }>(`/api/clients/${encodeURIComponent(paymentClient.id)}/payments`, {
+        method: "POST",
+        body: JSON.stringify({ amount: Number(paymentForm.amount), method: paymentForm.method, note: paymentForm.note, voucherImage: paymentForm.method === "qr" ? voucherImage : "" }),
+      });
+      replaceClient(result.client);
+      setPayments((current) => [result.payment, ...current]);
+      setPaymentClient(result.client);
+      setPaymentForm({ amount: result.client.balance > 0 ? String(result.client.balance) : "", method: "qr", note: "" });
+      setVoucherImage("");
+    } catch (error) { setPaymentError(error instanceof Error ? error.message : "No se pudo registrar el pago."); }
+    finally { setPaymentBusy(false); }
+  };
+
+  const openNewPlan = () => {
+    setEditingPlan(null);
+    setPlanForm({ name: "", price: "", billingType: "unlimited", sessionLimit: "12", durationMonths: "1", active: true });
+    setPlanError(""); setPlanOpen(true);
+  };
+
+  const openEditPlan = (plan: PlanRecord) => {
+    setEditingPlan(plan);
+    setPlanForm({ name: plan.name, price: String(plan.price), billingType: plan.billingType, sessionLimit: String(plan.sessionLimit ?? 12), durationMonths: String(plan.durationMonths), active: plan.active });
+    setPlanError(""); setPlanOpen(true);
+  };
+
+  const savePlan = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setPlanBusy(true); setPlanError("");
+    const payload = { name: planForm.name, price: Number(planForm.price || 0), billingType: planForm.billingType, sessionLimit: Number(planForm.sessionLimit || 12), durationMonths: Number(planForm.durationMonths || 1), active: planForm.active };
+    try {
+      const result = editingPlan
+        ? await apiJson<{ plan: PlanRecord }>(`/api/plans/${encodeURIComponent(editingPlan.id)}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiJson<{ plan: PlanRecord }>("/api/plans", { method: "POST", body: JSON.stringify(payload) });
+      setPlans((current) => editingPlan ? current.map((item) => item.id === result.plan.id ? result.plan : item) : [...current, result.plan]);
+      setPlanOpen(false);
+    } catch (error) { setPlanError(error instanceof Error ? error.message : "No se pudo guardar el plan."); }
+    finally { setPlanBusy(false); }
+  };
+
+  const handlePaymentQr = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setQrSaving(true); setQrError("");
+    try {
+      const image = await imageFileToDataUrl(file, 1600, 0.92, false);
+      const result = await apiJson<AppSettings>("/api/settings/payment-qr", { method: "PUT", body: JSON.stringify({ image }) });
+      setSettings(result);
+    } catch (error) { setQrError(error instanceof Error ? error.message : "No se pudo guardar el QR."); }
+    finally { setQrSaving(false); }
+  };
+
+  const showCard = async (record: ClientRecord) => {
+    const qr = await QRCode.toDataURL(memberQrValue(record.token), { errorCorrectionLevel: "M", width: 1024, margin: 4, color: { dark: "#17141f", light: "#ffffff" } });
+    setCardClient(record); setQrDataUrl(qr); setDownloadStatus("idle"); setCardOpen(true);
   };
 
   const downloadCard = async () => {
@@ -407,50 +591,162 @@ export default function Home() {
     } catch { setDownloadStatus("error"); }
   };
 
+  const openScanner = () => {
+    scanHandledRef.current = false; visitSubmittingRef.current = false;
+    setScanStep("camera"); setScannedClient(null); setScanError(""); setManualCode(""); setScannerOpen(true);
+  };
+
+  const closeScanner = () => {
+    scanHandledRef.current = false; visitSubmittingRef.current = false;
+    setScannerOpen(false); setScannedClient(null); setScanError("");
+  };
+
+  const findManualClient = (event: React.FormEvent) => {
+    event.preventDefault();
+    const code = tokenFromQr(manualCode);
+    if (!code) { setScanError("Ingresa el código corto o el teléfono del cliente."); return; }
+    const found = clients.find((item) => item.token === code || item.token.startsWith(code) || item.phone.includes(code));
+    if (!found) { setScanError("No encontramos un cliente con ese código o teléfono."); return; }
+    setScannedClient(found); setScanStep(found.accessStatus === "active" ? "found" : "blocked"); setScanError("");
+  };
+
+  const confirmVisit = () => { if (scannedClient) void registerVisitForClient(scannedClient); };
+
   const todayVisits = activities.filter((item) => (item.type === "visita" || item.type === "premio") && isToday(item.createdAt)).length;
-  const activeClients = clients.filter((item) => new Date(item.expiresAt) >= new Date()).length;
-  const totalStamps = clients.reduce((sum, item) => sum + item.stamps, 0);
-  const nearReward = clients.filter((item) => item.stamps >= 7 && item.stamps < 10).length;
+  const activeClients = clients.filter((item) => item.accessStatus === "active").length;
+  const suspendedClients = clients.filter((item) => item.accessStatus === "debt_suspended" || item.accessStatus === "manual_suspended").length;
+  const totalDebt = clients.reduce((sum, item) => sum + item.balance, 0);
   const filteredClients = useMemo(() => clients.filter((item) => `${item.name} ${item.phone} ${item.plan}`.toLowerCase().includes(search.toLowerCase())), [clients, search]);
+
+  if (authState !== "authenticated") {
+    return <main className="login-shell">
+      <section className="login-card">
+        <div className="login-brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div>
+        {authState === "checking" ? <div className="login-loading">Verificando sesión…</div> : <form onSubmit={login}>
+          <span className="view-kicker">ACCESO DE RECEPCIÓN</span>
+          <h1>Control central del gimnasio</h1>
+          <p>Clientes, cobros, vouchers y asistencias están protegidos por una sesión privada.</p>
+          <label><span>Contraseña</span><input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} placeholder="Contraseña de administrador"/></label>
+          {loginError && <div className="form-error">{loginError}</div>}
+          <button className="confirm-visit" disabled={loginBusy}>{loginBusy ? "Ingresando…" : "Ingresar"}</button>
+        </form>}
+      </section>
+    </main>;
+  }
 
   const dashboardView = <>
     <section className="scanner-card">
-      <div className="scanner-copy"><span className="live-pill"><i /> ESCÁNER LISTO</span><h2>Registra una visita<br />en segundos.</h2><p>Escanea la tarjeta digital de un cliente registrado para sumar asistencia y fidelidad.</p><button className="scan-button" onClick={openScanner}><span className="scan-symbol">⌗</span> Abrir escáner QR <b>→</b></button><small>{clients.length ? `${clients.length} cliente${clients.length === 1 ? "" : "s"} disponible${clients.length === 1 ? "" : "s"}` : "Primero registra un cliente"}</small></div>
-      <div className="scanner-visual" aria-hidden="true"><div className="glow-orb"/><div className="qr-frame"><i className="c1"/><i className="c2"/><i className="c3"/><i className="c4"/><div className="qr-grid">▦</div><span className="scan-line"/></div>{clients[0] && <div className="floating-card member-float"><span className="avatar avatar-photo">{initials(clients[0].name)}</span><div><small>ÚLTIMO REGISTRO</small><strong>{clients[0].name}</strong></div><b>✓</b></div>}<div className="floating-card stamp-float"><span>✦</span><div><strong>+1 sello</strong><small>Por cada visita</small></div></div></div>
+      <div className="scanner-copy"><span className="live-pill"><i/> ESCÁNER LISTO</span><h2>Registra una visita<br/>en segundos.</h2><p>El sistema valida vigencia, deuda, suspensión y límite de sesiones antes de permitir el ingreso.</p><button className="scan-button" onClick={openScanner}><span className="scan-symbol">⌗</span> Abrir escáner QR <b>→</b></button><small>{clients.length ? `${clients.length} clientes sincronizados` : "Primero registra un cliente"}</small></div>
+      <div className="scanner-visual" aria-hidden="true"><div className="glow-orb"/><div className="qr-frame"><i className="c1"/><i className="c2"/><i className="c3"/><i className="c4"/><div className="qr-grid">▦</div><span className="scan-line"/></div><div className="floating-card stamp-float"><span>✦</span><div><strong>Control automático</strong><small>Plan + deuda + sesiones</small></div></div></div>
     </section>
     <section className="metrics-grid">
-      <article className="metric-card"><div className="metric-icon purple">↙</div><div className="metric-top"><span>Visitas hoy</span><small>{todayVisits ? "Actualizado" : "Sin actividad"}</small></div><strong>{todayVisits}</strong><p>{todayVisits ? "Ingresos confirmados hoy" : "Aún no se registraron ingresos"}</p><div className="empty-chart"><i/><i/><i/><i/><i/><i/><i/></div></article>
-      <article className="metric-card"><div className="metric-icon lime">♙</div><div className="metric-top"><span>Miembros activos</span><small>{clients.length} total</small></div><strong>{activeClients}</strong><p>{activeClients ? "Con membresía vigente" : "Registra tu primer cliente"}</p><div className="progress"><i style={{ width: clients.length ? `${Math.round(activeClients / clients.length * 100)}%` : "0%" }}/></div></article>
-      <article className="metric-card"><div className="metric-icon coral">✦</div><div className="metric-top"><span>Sellos entregados</span><small>Acumulado</small></div><strong>{totalStamps}</strong><p>{nearReward} cliente{nearReward === 1 ? "" : "s"} cerca de premio</p><div className="metric-empty">Base central sincronizada</div></article>
+      <article className="metric-card"><div className="metric-icon purple">↙</div><div className="metric-top"><span>Visitas hoy</span><small>{todayVisits ? "Actualizado" : "Sin actividad"}</small></div><strong>{todayVisits}</strong><p>Ingresos confirmados</p></article>
+      <article className="metric-card"><div className="metric-icon lime">♙</div><div className="metric-top"><span>Miembros habilitados</span><small>{clients.length} total</small></div><strong>{activeClients}</strong><p>{suspendedClients} suspendidos</p></article>
+      <article className="metric-card"><div className="metric-icon coral">$</div><div className="metric-top"><span>Saldo por cobrar</span><small>Actual</small></div><strong>{money(totalDebt)}</strong><p>Deuda acumulada en membresías vigentes</p></article>
     </section>
     <section className="bottom-grid">
-      <article className="panel activity-panel"><div className="panel-head"><div><h3>Actividad reciente</h3><p>Movimientos registrados en recepción</p></div><button onClick={() => go("asistencias")}>Ver todo →</button></div>{activities.length ? <div className="activity-list">{activities.slice(0,4).map((item) => <div className="activity" key={item.id}><span className="avatar violet">{initials(item.clientName)}</span><div><strong>{item.clientName}</strong><p>{item.description}</p></div><time>{formatDate(item.createdAt)}</time></div>)}</div> : <div className="activity-empty"><span>⌁</span><div><strong>Tu historial está listo</strong><p>Las visitas, sellos y registros aparecerán aquí.</p></div><button onClick={openNewClient}>Registrar primer cliente</button></div>}</article>
-      <article className="panel loyalty-panel"><div className="panel-head"><div><h3>Fidelidad en movimiento</h3><p>Progreso general de tus clientes</p></div></div><div className={`loyalty-ring ${clients.length ? "" : "loyalty-empty"}`} style={clients.length ? { background: `conic-gradient(var(--purple) 0 ${Math.min(100, totalStamps / (clients.length * 10) * 100)}%, #eeecf1 0)` } : undefined}><div><strong>{clients.length ? Math.round(totalStamps / (clients.length * 10) * 100) : 0}%</strong><span>participación</span></div></div><div className="loyalty-stats"><div><span><i className="dot-lime"/>Tarjetas activas</span><strong>{clients.length}</strong></div><div><span><i className="dot-purple"/>Cerca de premio</span><strong>{nearReward}</strong></div></div></article>
+      <article className="panel activity-panel"><div className="panel-head"><div><h3>Actividad reciente</h3><p>Movimientos de recepción</p></div><button onClick={() => go("asistencias")}>Ver todo →</button></div>{activities.length ? <div className="activity-list">{activities.slice(0,5).map((item) => <div className="activity" key={item.id}><span className="avatar violet">{initials(item.clientName)}</span><div><strong>{item.clientName}</strong><p>{item.description}</p></div><time>{formatDateTime(item.createdAt)}</time></div>)}</div> : <div className="activity-empty"><span>⌁</span><div><strong>Historial listo</strong><p>Las visitas aparecerán aquí.</p></div></div>}</article>
+      <article className="panel debt-panel"><div className="panel-head"><div><h3>Control de pagos</h3><p>Tolerancia máxima de 14 días</p></div><button onClick={() => go("cobros")}>Abrir cobros →</button></div><div className="debt-summary"><strong>{money(totalDebt)}</strong><span>saldo total pendiente</span><div><b>{clients.filter((item)=>item.paymentStatus==="partial").length}</b> parciales · <b>{clients.filter((item)=>item.paymentStatus==="due").length}</b> sin pago</div></div></article>
     </section>
   </>;
 
-  const clientsView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">GESTIÓN DE MIEMBROS</span><h1>Clientes</h1><p>{clients.length} cliente{clients.length === 1 ? " registrado" : "s registrados"} en este equipo.</p></div><button className="primary-button page-action" onClick={openNewClient}>＋ Nuevo cliente</button></div><div className="list-toolbar"><div className="search-box">⌕<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nombre, teléfono o plan"/></div><span>{filteredClients.length} resultado{filteredClients.length === 1 ? "" : "s"}</span></div>{filteredClients.length ? <div className="clients-table"><div className="client-row table-head"><span>Cliente</span><span>Plan</span><span>Fidelidad</span><span>Estado</span><span/></div>{filteredClients.map((item) => <div className="client-row" key={item.id}><div className="client-identity">{item.photo ? <img src={item.photo} alt=""/> : <span className="avatar violet">{initials(item.name)}</span>}<div><strong>{item.name}</strong><small>{item.phone}</small></div></div><div><strong>{item.plan.split(" · ")[0]}</strong><small>Vence {formatDate(item.expiresAt)}</small></div><div><strong>{item.stamps}/10 sellos</strong><div className="row-progress"><i style={{width:`${item.stamps * 10}%`}}/></div></div><span className={`status-badge ${new Date(item.expiresAt) >= new Date() ? "active" : "expired"}`}>{new Date(item.expiresAt) >= new Date() ? "Activo" : "Vencido"}</span><div className="row-actions"><button onClick={() => showCard(item)}>Tarjeta</button><button onClick={() => openEditClient(item)}>Editar</button><button className="danger-action" onClick={() => setDeletingClient(item)}>Eliminar</button><button onClick={() => { visitSubmittingRef.current=false; setScannedClient(item); setScanStep("found"); setScannerOpen(true); }}>＋ Visita</button></div></div>)}</div> : <div className="big-empty"><span>♙</span><h2>No hay clientes todavía</h2><p>Registra al primero y aparecerá aquí inmediatamente.</p><button onClick={openNewClient}>Registrar cliente</button></div>}</section>;
+  const clientsView = <section className="view-page">
+    <div className="view-heading"><div><span className="view-kicker">GESTIÓN DE MIEMBROS</span><h1>Clientes</h1><p>{clients.length} miembros en la base central.</p></div><button className="primary-button page-action" onClick={openNewClient}>＋ Nuevo cliente</button></div>
+    <div className="list-toolbar"><div className="search-box">⌕<input value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="Buscar por nombre, teléfono o plan"/></div><span>{filteredClients.length} resultados</span></div>
+    {filteredClients.length ? <div className="clients-table">
+      <div className="client-row table-head"><span>Cliente</span><span>Plan / pago</span><span>Uso</span><span>Estado</span><span/></div>
+      {filteredClients.map((item)=><div className="client-row" key={item.id}>
+        <div className="client-identity"><ClientAvatar client={item}/><div><strong>{item.name}</strong><small>{item.phone}</small></div></div>
+        <div className="client-plan-cell"><strong>{item.plan}</strong><small>Vence {formatDate(item.expiresAt)}</small><em className={`payment-pill ${item.paymentStatus}`}>{paymentLabel(item)} · {item.balance ? `${money(item.balance)} saldo` : "sin saldo"}</em></div>
+        <div className="client-usage"><strong>{item.sessionLimit ? `${item.sessionsUsed}/${item.sessionLimit} sesiones` : `${item.visits} visitas`}</strong><small>{item.stamps}/10 sellos</small></div>
+        <span className={`status-badge ${item.accessStatus}`}>{accessLabel(item)}</span>
+        <div className="row-actions">
+          <button onClick={()=>openPayment(item)}>Cobrar</button>
+          <button onClick={()=>showCard(item)}>Tarjeta</button>
+          <button onClick={()=>openRenew(item)}>Renovar</button>
+          <button onClick={()=>openEditClient(item)}>Editar</button>
+          <a className="row-link" target="_blank" rel="noreferrer" href={`https://wa.me/${item.phone.replace(/\D/g,"")}`}>WhatsApp</a>
+          <button className="danger-action" onClick={()=>setDeletingClient(item)}>Eliminar</button>
+          <button onClick={()=>{visitSubmittingRef.current=false;setScannedClient(item);setScanStep(item.accessStatus==="active"?"found":"blocked");setScannerOpen(true);}}>＋ Visita</button>
+        </div>
+      </div>)}
+    </div> : <div className="big-empty"><span>♙</span><h2>No hay clientes</h2><p>Registra el primero para comenzar.</p><button onClick={openNewClient}>Registrar cliente</button></div>}
+  </section>;
 
-  const plansView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">MEMBRESÍAS</span><h1>Planes</h1><p>Opciones disponibles para asignar a tus clientes.</p></div></div><div className="plan-grid">{plans.map((plan) => <article className="plan-card" key={plan.name}><span className={`plan-symbol ${plan.tone}`}>◇</span><small>{plan.duration} DÍAS</small><h2>{plan.name.split(" · ")[0]}</h2><strong>{plan.price}</strong><p>{clients.filter((item) => item.plan === plan.name).length} miembros asignados</p><button onClick={openNewClient}>Asignar a un cliente →</button></article>)}</div></section>;
+  const plansView = <section className="view-page">
+    <div className="view-heading"><div><span className="view-kicker">MEMBRESÍAS</span><h1>Planes</h1><p>Los precios y límites se administran aquí. El plan de 12 sesiones queda editable para que definas su precio.</p></div><button className="primary-button page-action" onClick={openNewPlan}>＋ Nuevo plan</button></div>
+    <div className="plan-grid">{plans.map((plan)=><article className={`plan-card ${plan.active ? "" : "plan-disabled"}`} key={plan.id}><span className="plan-symbol purple">◇</span><small>{plan.durationMonths} MES{plan.durationMonths===1?"":"ES"}</small><h2>{plan.name}</h2><strong>{plan.price > 0 ? money(plan.price) : "PRECIO POR DEFINIR"}</strong><p>{plan.billingType==="sessions" ? `${plan.sessionLimit} ingresos por período` : "Ingresos ilimitados durante la vigencia"}</p><p>{clients.filter((item)=>item.planId===plan.id).length} miembros actuales</p><button onClick={()=>openEditPlan(plan)}>Editar plan →</button></article>)}</div>
+  </section>;
 
-  const loyaltyView = <section className="view-page loyalty-page"><div className="view-heading"><div><span className="view-kicker">GALERÍA DE TARJETAS</span><h1>Fidelidad</h1><p>Visualiza el QR y los sellos de cada cliente en su tarjeta digital.</p></div><button className="primary-button page-action" onClick={openNewClient}>＋ Nuevo cliente</button></div>{clients.length ? <><div className="list-toolbar loyalty-toolbar"><div className="search-box">⌕<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar una tarjeta por cliente, teléfono o plan"/></div><span>{filteredClients.length} tarjeta{filteredClients.length === 1 ? "" : "s"}</span></div>{filteredClients.length ? <div className="loyalty-gallery">{filteredClients.map((item) => <LoyaltyGalleryCard client={item} key={item.id} onOpen={showCard} onVisit={(client) => { visitSubmittingRef.current=false; setScannedClient(client); setScanStep("found"); setScannerOpen(true); }}/>)}</div> : <div className="big-empty"><span>⌕</span><h2>No encontramos esa tarjeta</h2><p>Prueba buscando por otro nombre, teléfono o plan.</p></div>}</> : <div className="big-empty"><span>✦</span><h2>Sin tarjetas activas</h2><p>Las tarjetas aparecerán al registrar clientes.</p><button onClick={openNewClient}>Registrar cliente</button></div>}</section>;
+  const loyaltyView = <section className="view-page loyalty-page"><div className="view-heading"><div><span className="view-kicker">GALERÍA DE TARJETAS</span><h1>Fidelidad</h1><p>QR único y sellos de cada miembro.</p></div></div><div className="list-toolbar loyalty-toolbar"><div className="search-box">⌕<input value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="Buscar tarjeta"/></div></div>{filteredClients.length ? <div className="loyalty-gallery">{filteredClients.map((item)=><LoyaltyGalleryCard client={item} key={item.id} onOpen={showCard} onVisit={(client)=>{setScannedClient(client);setScanStep(client.accessStatus==="active"?"found":"blocked");setScannerOpen(true);}}/>)}</div> : <div className="big-empty"><span>✦</span><h2>Sin tarjetas</h2></div>}</section>;
 
-  const attendanceView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">OPERACIÓN</span><h1>Asistencias</h1><p>Historial central de registros y visitas.</p></div><button className="primary-button page-action" onClick={openScanner}>⌗ Escanear QR</button></div>{activities.length ? <div className="history-list">{activities.map((item) => <article key={item.id}><span className={`history-icon ${item.type}`}>{item.type === "registro" ? "＋" : item.type === "premio" ? "✦" : "✓"}</span><div><strong>{item.clientName}</strong><p>{item.description}</p></div><time>{new Date(item.createdAt).toLocaleString("es-BO")}</time></article>)}</div> : <div className="big-empty"><span>✓</span><h2>Aún no hay movimientos</h2><p>Registra un cliente o escanea una tarjeta.</p></div>}</section>;
+  const attendanceView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">OPERACIÓN</span><h1>Asistencias</h1><p>El ingreso se bloquea automáticamente si el plan venció, agotó sesiones o superó los 14 días de tolerancia con deuda.</p></div><button className="primary-button page-action" onClick={openScanner}>⌗ Escanear QR</button></div>{activities.length ? <div className="history-list">{activities.map((item)=><article key={item.id}><span className={`history-icon ${item.type}`}>{item.type==="registro"?"＋":item.type==="premio"?"✦":"✓"}</span><div><strong>{item.clientName}</strong><p>{item.description}</p></div><time>{formatDateTime(item.createdAt)}</time></article>)}</div> : <div className="big-empty"><span>✓</span><h2>Aún no hay movimientos</h2></div>}</section>;
 
-  const reportsView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">RESUMEN LOCAL</span><h1>Reportes</h1><p>Indicadores calculados desde la base central de Monster Gym.</p></div></div><div className="report-grid"><article><span>Clientes registrados</span><strong>{clients.length}</strong><p>{activeClients} membresías vigentes</p></article><article><span>Visitas acumuladas</span><strong>{clients.reduce((sum,item)=>sum+item.visits,0)}</strong><p>{todayVisits} registradas hoy</p></article><article><span>Sellos entregados</span><strong>{totalStamps}</strong><p>{nearReward} cerca de recompensa</p></article></div></section>;
+  const cobrosView = <section className="view-page">
+    <div className="view-heading"><div><span className="view-kicker">CAJA Y RESPALDOS</span><h1>Cobros</h1><p>QR oficial del gimnasio, saldos y vouchers guardados en el servidor.</p></div></div>
+    <div className="billing-grid">
+      <article className="panel payment-qr-settings"><div className="panel-head"><div><h3>QR de cobro del gimnasio</h3><p>Esta imagen se mostrará al registrar un pago por QR.</p></div></div>{settings.paymentQrUrl ? <img src={settings.paymentQrUrl} alt="QR de cobro del gimnasio"/> : <div className="qr-empty">Aún no cargaste el QR de cobro</div>}<label className="upload-button">{qrSaving ? "Guardando…" : settings.paymentQrUrl ? "Reemplazar QR" : "Cargar QR"}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={handlePaymentQr} disabled={qrSaving}/></label>{qrError&&<p className="form-error">{qrError}</p>}</article>
+      <article className="panel debt-list"><div className="panel-head"><div><h3>Saldos pendientes</h3><p>Clientes con pago incompleto</p></div></div>{clients.filter((item)=>item.balance>0).length ? clients.filter((item)=>item.balance>0).sort((a,b)=>b.balance-a.balance).map((item)=><button className="debt-row" key={item.id} onClick={()=>openPayment(item)}><span><strong>{item.name}</strong><small>{item.plan} · tolerancia hasta {formatDate(item.graceUntil)}</small></span><b>{money(item.balance)}</b></button>) : <div className="big-empty compact"><span>✓</span><h2>Sin saldos pendientes</h2></div>}</article>
+    </div>
+  </section>;
 
-  const content: Record<View, React.ReactNode> = { inicio: dashboardView, clientes: clientsView, planes: plansView, fidelidad: loyaltyView, asistencias: attendanceView, reportes: reportsView };
+  const reportsView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">RESUMEN CENTRAL</span><h1>Reportes</h1><p>Indicadores de membresías, accesos y pagos.</p></div></div><div className="report-grid"><article><span>Clientes</span><strong>{clients.length}</strong><p>{activeClients} habilitados</p></article><article><span>Visitas</span><strong>{clients.reduce((sum,item)=>sum+item.visits,0)}</strong><p>{todayVisits} hoy</p></article><article><span>Por cobrar</span><strong>{money(totalDebt)}</strong><p>{suspendedClients} suspendidos</p></article></div></section>;
+
+  const content: Record<View, React.ReactNode> = { inicio: dashboardView, clientes: clientsView, planes: plansView, fidelidad: loyaltyView, asistencias: attendanceView, cobros: cobrosView, reportes: reportsView };
 
   return <main className="app-shell">
-    <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div><nav aria-label="Navegación principal"><p className="nav-label">GESTIÓN</p><button className={`nav-item ${view === "inicio" ? "active" : ""}`} onClick={() => go("inicio")}><Icon>⌂</Icon> Inicio</button><button className={`nav-item ${view === "clientes" ? "active" : ""}`} onClick={() => go("clientes")}><Icon>♙</Icon> Clientes <span className="nav-count">{clients.length}</span></button><button className={`nav-item ${view === "planes" ? "active" : ""}`} onClick={() => go("planes")}><Icon>◇</Icon> Planes</button><button className={`nav-item ${view === "fidelidad" ? "active" : ""}`} onClick={() => go("fidelidad")}><Icon>✦</Icon> Fidelidad</button><p className="nav-label secondary">OPERACIÓN</p><button className={`nav-item ${view === "asistencias" ? "active" : ""}`} onClick={() => go("asistencias")}><Icon>✓</Icon> Asistencias</button><button className={`nav-item ${view === "reportes" ? "active" : ""}`} onClick={() => go("reportes")}><Icon>↗</Icon> Reportes</button></nav><div className="sidebar-footer"><div className="storage-mini"><span className="status-dot"/><div><strong>BASE CENTRAL</strong><small>Sincronizada entre dispositivos</small></div></div><button className="profile-button"><span className="avatar avatar-small">MO</span><span><strong>Milton Ortiz</strong><small>Administrador</small></span></button></div></aside>
-    {sidebarOpen && <button className="backdrop" aria-label="Cerrar menú" onClick={() => setSidebarOpen(false)}/>}<section className="main-content"><header className="topbar"><button className="menu-button" aria-label="Abrir menú" onClick={() => setSidebarOpen(true)}>☰</button><div className="gym-status"><span className="status-dot"/> Monster Gym — Sucursal Central</div><div className="top-actions"><button className="icon-button" aria-label="Buscar clientes" onClick={() => go("clientes")}>⌕</button><button className="primary-button" onClick={openNewClient}><span>＋</span> Nuevo cliente</button></div></header><div className="dashboard">{centralError && <div className="central-error"><strong>Sin conexión con la base central.</strong><span>{centralError}</span><button onClick={() => void loadCentralState()}>Reintentar</button></div>}{!centralLoaded && !centralError && <div className="central-loading">Sincronizando datos…</div>}{content[view]}</div></section>
+    <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
+      <div className="brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div>
+      <nav aria-label="Navegación principal">
+        <p className="nav-label">GESTIÓN</p>
+        <button className={`nav-item ${view==="inicio"?"active":""}`} onClick={()=>go("inicio")}><span className="nav-icon">⌂</span> Inicio</button>
+        <button className={`nav-item ${view==="clientes"?"active":""}`} onClick={()=>go("clientes")}><span className="nav-icon">♙</span> Clientes <span className="nav-count">{clients.length}</span></button>
+        <button className={`nav-item ${view==="planes"?"active":""}`} onClick={()=>go("planes")}><span className="nav-icon">◇</span> Planes</button>
+        <button className={`nav-item ${view==="fidelidad"?"active":""}`} onClick={()=>go("fidelidad")}><span className="nav-icon">✦</span> Fidelidad</button>
+        <p className="nav-label secondary">OPERACIÓN</p>
+        <button className={`nav-item ${view==="asistencias"?"active":""}`} onClick={()=>go("asistencias")}><span className="nav-icon">✓</span> Asistencias</button>
+        <button className={`nav-item ${view==="cobros"?"active":""}`} onClick={()=>go("cobros")}><span className="nav-icon">$</span> Cobros</button>
+        <button className={`nav-item ${view==="reportes"?"active":""}`} onClick={()=>go("reportes")}><span className="nav-icon">↗</span> Reportes</button>
+      </nav>
+      <div className="sidebar-footer"><div className="storage-mini"><span className="status-dot"/><div><strong>BASE CENTRAL</strong><small>SQLite · respaldos de pago</small></div></div><button className="profile-button" onClick={logout}><span className="avatar avatar-small">MO</span><span><strong>Administrador</strong><small>Cerrar sesión</small></span></button></div>
+    </aside>
+    {sidebarOpen&&<button className="backdrop" aria-label="Cerrar menú" onClick={()=>setSidebarOpen(false)}/>}
+    <section className="main-content"><header className="topbar"><button className="menu-button" aria-label="Abrir menú" onClick={()=>setSidebarOpen(true)}>☰</button><div className="gym-status"><span className="status-dot"/> Monster Gym — Sucursal Central</div><div className="top-actions"><button className="icon-button" onClick={()=>go("clientes")}>⌕</button><button className="primary-button" onClick={openNewClient}><span>＋</span> Nuevo cliente</button></div></header><div className="dashboard">{centralError&&<div className="central-error"><strong>Error de sincronización.</strong><span>{centralError}</span><button onClick={()=>void loadCentralState()}>Reintentar</button></div>}{!centralLoaded&&!centralError&&<div className="central-loading">Sincronizando datos…</div>}{content[view]}</div></section>
 
-    {clientOpen && <div className="modal-layer" role="dialog" aria-modal="true" aria-label={editingClient ? "Editar cliente" : "Registrar nuevo cliente"}><button className="modal-scrim" aria-label="Cerrar" onClick={() => setClientOpen(false)}/><section className="client-modal"><header><div><span className="modal-kicker">{editingClient ? "EDITAR MIEMBRO" : "NUEVO MIEMBRO"}</span><h2>{editingClient ? "Editar cliente" : "Registra un cliente"}</h2><p>{editingClient ? "Los cambios se sincronizarán en todos los dispositivos." : "Se guardará en la base central y tendrá un QR único."}</p></div><button className="close-button" onClick={() => setClientOpen(false)}>×</button></header><form onSubmit={saveClient}><label className={`photo-input ${photoUrl ? "has-photo" : ""}`}>{photoUrl ? <img src={photoUrl} alt="Vista previa"/> : <span>＋</span>}<strong>{photoUrl ? "Foto cargada" : "Añadir foto"}</strong><small>{photoUrl ? "Pulsa para cambiarla" : "JPG o PNG · máx. 5 MB"}</small><input type="file" accept="image/png,image/jpeg,image/webp" onChange={handlePhoto}/></label><div className="field-grid"><label><span>Nombre completo</span><input required value={clientForm.name} onChange={(event) => setClientForm({...clientForm,name:event.target.value})} placeholder="Ej. Carlos Mendoza"/></label><label><span>WhatsApp</span><input required value={clientForm.phone} onChange={(event) => setClientForm({...clientForm,phone:event.target.value})} placeholder="+591 700 000 00"/></label></div><div className="field-grid"><label className="full-field compact-field"><span>Plan de membresía</span><select value={clientForm.plan} onChange={(event) => { const plan = event.target.value; setClientForm({...clientForm,plan,expiresAt: editingClient ? clientForm.expiresAt : planExpiryInput(plan)}); }}>{plans.map((plan)=><option key={plan.name}>{plan.name}</option>)}</select></label><label className="full-field compact-field"><span>Vigente hasta</span><input type="date" required value={clientForm.expiresAt} onChange={(event) => setClientForm({...clientForm,expiresAt:event.target.value})}/></label></div>{formError && <p className="form-error">{formError}</p>}<div className="form-note"><span>✦</span><p><strong>{editingClient ? "Identidad y QR preservados" : "Tarjeta de fidelidad incluida"}</strong><br/>{editingClient ? "Editar el cliente no borra sus visitas, sellos ni código QR." : "Generaremos un identificador y QR irrepetibles."}</p></div><div className="form-actions"><button type="button" onClick={() => setClientOpen(false)}>Cancelar</button><button type="submit" disabled={clientSaving}>{clientSaving ? "Guardando…" : editingClient ? "Guardar cambios" : "Crear cliente y tarjeta"} <span>→</span></button></div></form></section></div>}
+    {clientOpen&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setClientOpen(false)}/><section className="client-modal"><header><div><span className="modal-kicker">{editingClient?"EDITAR MIEMBRO":"NUEVO MIEMBRO"}</span><h2>{editingClient?"Editar cliente":"Registrar cliente"}</h2><p>{editingClient?"El plan se renueva desde la acción Renovar.":"La vigencia se calcula de fecha a fecha."}</p></div><button className="close-button" onClick={()=>setClientOpen(false)}>×</button></header><form onSubmit={saveClient}>
+      <label className={`photo-input ${photoUrl?"has-photo":""}`}>{photoUrl?<img src={photoUrl} alt="Vista previa"/>:<span>＋</span>}<strong>{photoUrl?"Foto cargada":"Añadir foto"}</strong><small>JPG, PNG o WEBP</small><input type="file" accept="image/png,image/jpeg,image/webp" onChange={handlePhoto}/></label>
+      <div className="field-grid"><label><span>Nombre completo</span><input required value={clientForm.name} onChange={(e)=>setClientForm({...clientForm,name:e.target.value})}/></label><label><span>WhatsApp</span><input required value={clientForm.phone} onChange={(e)=>setClientForm({...clientForm,phone:e.target.value})}/></label></div>
+      {!editingClient&&<div className="field-grid"><label><span>Plan</span><select value={clientForm.planId} onChange={(e)=>setClientForm({...clientForm,planId:e.target.value})}>{activePlans.map((plan)=><option value={plan.id} key={plan.id}>{plan.name} · {plan.price?money(plan.price):"precio pendiente"}</option>)}</select></label><label><span>Inicio</span><input type="date" value={clientForm.startsAt} onChange={(e)=>setClientForm({...clientForm,startsAt:e.target.value})}/></label></div>}
+      {editingClient&&<div className="switch-field"><input aria-label="Suspensión manual" type="checkbox" checked={clientForm.manualSuspended} onChange={(e)=>setClientForm({...clientForm,manualSuspended:e.target.checked})}/><span><strong>Suspensión manual</strong><small>Bloquea el ingreso aunque el plan esté vigente y pagado.</small></span></div>}
+      {formError&&<p className="form-error">{formError}</p>}
+      <div className="form-actions"><button type="button" onClick={()=>setClientOpen(false)}>Cancelar</button><button type="submit" disabled={clientSaving}>{clientSaving?"Guardando…":editingClient?"Guardar cambios":"Crear cliente"}</button></div>
+    </form></section></div>}
 
-    {deletingClient && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Eliminar cliente"><button className="modal-scrim" aria-label="Cancelar" onClick={() => setDeletingClient(null)}/><section className="delete-modal"><div className="delete-symbol">!</div><span className="modal-kicker">ELIMINAR CLIENTE</span><h2>¿Eliminar a {deletingClient.name}?</h2><p>Se eliminarán también sus asistencias y actividad. Esta acción no se puede deshacer.</p><div><button onClick={() => setDeletingClient(null)}>Cancelar</button><button className="delete-confirm" onClick={deleteClientRecord}>Eliminar definitivamente</button></div></section></div>}
+    {renewingClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setRenewingClient(null)}/><section className="simple-modal"><header><div><span className="modal-kicker">RENOVAR MEMBRESÍA</span><h2>{renewingClient.name}</h2><p>Inicia un período nuevo, reinicia las sesiones del plan y conserva todo el historial anterior.</p></div><button className="close-button" onClick={()=>setRenewingClient(null)}>×</button></header><form onSubmit={renewClient}><label><span>Plan</span><select value={renewForm.planId} onChange={(e)=>setRenewForm({...renewForm,planId:e.target.value})}>{activePlans.map((plan)=><option value={plan.id} key={plan.id}>{plan.name} · {plan.price?money(plan.price):"precio pendiente"}</option>)}</select></label><label><span>Fecha de inicio</span><input type="date" value={renewForm.startsAt} onChange={(e)=>setRenewForm({...renewForm,startsAt:e.target.value})}/></label><div className="form-actions"><button type="button" onClick={()=>setRenewingClient(null)}>Cancelar</button><button disabled={renewBusy}>{renewBusy?"Renovando…":"Renovar plan"}</button></div></form></section></div>}
 
-    {cardOpen && cardClient && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Tarjeta digital"><button className="modal-scrim" aria-label="Cerrar" onClick={() => setCardOpen(false)}/><section className="card-modal"><header><div><span className="modal-kicker">TARJETA DIGITAL</span><h2>{cardClient.name}</h2></div><button className="close-button" onClick={() => setCardOpen(false)}>×</button></header><div className="digital-card" ref={cardRef}><div className="card-top"><div className="mini-brand"><b>M</b><span>MONSTER<br/><small>GYM OS</small></span></div><span className="card-tier">MEMBER</span></div><div className="card-person">{cardClient.photo ? <img className="card-photo card-photo-image" src={cardClient.photo} alt=""/> : <span className="card-photo">{initials(cardClient.name)}</span>}<div><small>MIEMBRO</small><strong>{cardClient.name}</strong><p>{cardClient.plan}</p><code>ID {cardClient.token.slice(0,8).toUpperCase()}</code></div></div><div className="card-bottom"><div className="card-loyalty"><small>FIDELIDAD · {cardClient.stamps}/10 SELLOS</small><div className="mini-stamps">{Array.from({length:10},(_,index)=>{ const visit = clientVisitHistory(cardClient)[index]; return <i key={index} className={index < cardClient.stamps ? "on" : ""} title={visit ? formatStampDateTime(visit) : "Pendiente"}>{index < cardClient.stamps ? "M" : ""}</i>; })}</div>{cardClient.lastVisit && <span className="card-last-stamp">Último sello · {formatStampDateTime(cardClient.lastVisit)}</span>}</div><div className="qr-code">{qrDataUrl && <img src={qrDataUrl} alt={`QR único de ${cardClient.name}`}/>}</div></div></div><p className="card-help">Escanea este QR desde el sistema para registrar una visita automáticamente. ID <strong>{cardClient.token.slice(0,8).toUpperCase()}</strong>.</p><div className="share-actions"><button className="download-button" onClick={downloadCard} disabled={downloadStatus === "working"}>{downloadStatus === "working" ? "Generando PNG…" : downloadStatus === "done" ? "✓ PNG descargado" : downloadStatus === "error" ? "Reintentar" : "↓ Descargar PNG"}</button><a className="whatsapp-button" target="_blank" rel="noreferrer" href={`https://wa.me/${cardClient.phone.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${cardClient.name}, tu tarjeta digital de Monster Gym está lista. Te enviaré la imagen a continuación.`)}`}>Abrir WhatsApp ↗</a></div></section></div>}
+    {paymentClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setPaymentClient(null)}/><section className="payment-modal"><header><div><span className="modal-kicker">REGISTRAR PAGO</span><h2>{paymentClient.name}</h2><p>{paymentClient.plan} · Total {money(paymentClient.membershipPrice)}</p></div><button className="close-button" onClick={()=>setPaymentClient(null)}>×</button></header>
+      <div className="payment-summary"><div><span>Plan</span><strong>{money(paymentClient.membershipPrice)}</strong></div><div><span>Pagado</span><strong>{money(paymentClient.paidAmount)}</strong></div><div className="balance"><span>Saldo</span><strong>{money(paymentClient.balance)}</strong></div></div>
+      {paymentClient.balance>0?<form onSubmit={registerPaymentRecord}>
+        <div className="payment-methods"><button type="button" className={paymentForm.method==="qr"?"selected":""} onClick={()=>setPaymentForm({...paymentForm,method:"qr"})}>▦ QR</button><button type="button" className={paymentForm.method==="cash"?"selected":""} onClick={()=>setPaymentForm({...paymentForm,method:"cash"})}>Bs Efectivo</button></div>
+        {paymentForm.method==="qr"&&<div className="payment-qr-flow">{settings.paymentQrUrl?<img className="owner-qr" src={settings.paymentQrUrl} alt="QR de cobro"/>:<div className="qr-empty">Primero carga el QR del gimnasio en Cobros.</div>}<label className={`voucher-capture ${voucherImage?"has-voucher":""}`}>{voucherImage?<img src={voucherImage} alt="Voucher capturado"/>:<><span>📷</span><strong>Tomar foto del voucher</strong><small>También puedes elegir una imagen de la galería</small></>}<input type="file" accept="image/*" capture="environment" onChange={handleVoucher}/></label></div>}
+        <div className="field-grid"><label><span>Monto</span><input type="number" min="0.01" step="0.01" max={paymentClient.balance} value={paymentForm.amount} onChange={(e)=>setPaymentForm({...paymentForm,amount:e.target.value})}/></label><label><span>Nota opcional</span><input value={paymentForm.note} onChange={(e)=>setPaymentForm({...paymentForm,note:e.target.value})}/></label></div>
+        {paymentError&&<p className="form-error">{paymentError}</p>}<button className="confirm-visit" disabled={paymentBusy||paymentForm.method==="qr"&&!voucherImage}>{paymentBusy?"Registrando…":"Registrar pago"}</button>
+      </form>:<div className="paid-state">✓ Membresía pagada completamente</div>}
+      <div className="payment-history"><h3>Historial de pagos</h3>{payments.length?payments.map((payment)=><article key={payment.id}><div><strong>{money(payment.amount)}</strong><span>{payment.method==="qr"?"QR":"Efectivo"} · {formatDateTime(payment.createdAt)}</span>{payment.note&&<small>{payment.note}</small>}</div>{payment.voucherUrl&&<a target="_blank" rel="noreferrer" href={payment.voucherUrl}>Ver voucher</a>}</article>):<p>Sin pagos registrados para este cliente.</p>}</div>
+    </section></div>}
 
-    {scannerOpen && <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Escáner QR"><button className="modal-scrim" aria-label="Cerrar" onClick={closeScanner}/><section className="scanner-modal"><header><div><span className="modal-kicker">RECEPCIÓN</span><h2>{scanStep === "success" ? "¡Visita registrada!" : scanStep === "found" ? "Cliente identificado" : scanStep === "missing" ? "Tarjeta no encontrada" : "Escanear tarjeta"}</h2></div><button className="close-button" onClick={closeScanner}>×</button></header>{scanStep === "camera" && <div className="camera-content"><div className="camera-view real-camera"><div id="qr-reader"/><div className="camera-tip">Centra el QR dentro del marco</div></div>{scanError && <p className="scan-error">{scanError}</p>}<form className="manual-scan" onSubmit={findManualClient}><input value={manualCode} onChange={(event) => setManualCode(event.target.value)} placeholder="Código corto o teléfono"/><button>Buscar</button></form><p className="privacy-note">La cámara solo funciona mientras esta ventana está abierta.</p></div>}{scanStep === "missing" && <div className="missing-state"><div className="missing-symbol">!</div><h3>Cliente no encontrado en la base central</h3><p>Verifica que el QR corresponda a un cliente activo registrado en Monster Gym.</p><button className="confirm-visit" onClick={closeScanner}>Entendido</button></div>}{scanStep === "found" && scannedClient && <div className="found-client"><div className="member-hero">{scannedClient.photo ? <img className="avatar found-avatar" src={scannedClient.photo} alt=""/> : <span className="avatar found-avatar">{initials(scannedClient.name)}</span>}<span className="verified">✓</span></div><span className="found-label">CLIENTE IDENTIFICADO</span><h3>{scannedClient.name}</h3><p>{scannedClient.plan} · Vigente hasta {formatDate(scannedClient.expiresAt)}</p><div className="stamp-progress"><div className="stamp-copy"><span>Tarjeta de fidelidad</span><strong>{scannedClient.stamps} de 10 sellos</strong></div><div className="stamps">{Array.from({length:10},(_,index)=>{ const visit = clientVisitHistory(scannedClient)[index]; return <i className={index < scannedClient.stamps ? "filled" : ""} key={index} title={visit ? formatStampDateTime(visit) : "Pendiente"}>{index < scannedClient.stamps ? "M" : ""}</i>; })}</div>{scannedClient.lastVisit && <small className="scan-last-stamp">Último sello · {formatStampDateTime(scannedClient.lastVisit)}</small>}</div><button className="confirm-visit" onClick={confirmVisit}>Confirmar visita <span>+1 sello</span></button><button className="text-action" onClick={() => {scanHandledRef.current=false;visitSubmittingRef.current=false;setScanStep("camera");setScannedClient(null);}}>Escanear otro código</button></div>}{scanStep === "success" && scannedClient && <div className="success-state"><div className="success-burst">✓</div><h3>{scannedClient.name} suma una visita</h3><p>Ahora tiene <strong>{scannedClient.stamps} de 10 sellos.</strong><br/><span className="success-time">Sello registrado: {formatStampDateTime(scannedClient.lastVisit ?? new Date().toISOString())}</span><br/>{scannedClient.stamps === 10 ? "¡Recompensa desbloqueada!" : `Le faltan ${10-scannedClient.stamps} para su recompensa.`}</p><div className="reward-chip"><span>✦</span><div><small>PRÓXIMA RECOMPENSA</small><strong>1 batido proteico gratis</strong></div></div><button className="confirm-visit" onClick={closeScanner}>Listo, continuar</button></div>}</section></div>}
+    {planOpen&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setPlanOpen(false)}/><section className="simple-modal"><header><div><span className="modal-kicker">{editingPlan?"EDITAR PLAN":"NUEVO PLAN"}</span><h2>{editingPlan?editingPlan.name:"Crear plan"}</h2><p>Esto permite agregar el cuarto plan cuando el dueño lo defina.</p></div><button className="close-button" onClick={()=>setPlanOpen(false)}>×</button></header><form onSubmit={savePlan}><label><span>Nombre</span><input required value={planForm.name} onChange={(e)=>setPlanForm({...planForm,name:e.target.value})}/></label><div className="field-grid"><label><span>Precio Bs</span><input type="number" min="0" step="0.01" value={planForm.price} onChange={(e)=>setPlanForm({...planForm,price:e.target.value})}/></label><label><span>Duración en meses</span><input type="number" min="1" value={planForm.durationMonths} onChange={(e)=>setPlanForm({...planForm,durationMonths:e.target.value})}/></label></div><label><span>Tipo</span><select value={planForm.billingType} onChange={(e)=>setPlanForm({...planForm,billingType:e.target.value as "unlimited"|"sessions"})}><option value="unlimited">Ingresos ilimitados</option><option value="sessions">Cantidad limitada de sesiones</option></select></label>{planForm.billingType==="sessions"&&<label><span>Sesiones por período</span><input type="number" min="1" value={planForm.sessionLimit} onChange={(e)=>setPlanForm({...planForm,sessionLimit:e.target.value})}/></label>}<div className="switch-field"><input aria-label="Plan disponible" type="checkbox" checked={planForm.active} onChange={(e)=>setPlanForm({...planForm,active:e.target.checked})}/><span><strong>Plan disponible</strong><small>Los planes desactivados conservan el historial.</small></span></div>{planError&&<p className="form-error">{planError}</p>}<div className="form-actions"><button type="button" onClick={()=>setPlanOpen(false)}>Cancelar</button><button disabled={planBusy}>{planBusy?"Guardando…":"Guardar plan"}</button></div></form></section></div>}
+
+    {deletingClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setDeletingClient(null)}/><section className="delete-modal"><div className="delete-symbol">!</div><span className="modal-kicker">ELIMINAR CLIENTE</span><h2>¿Eliminar a {deletingClient.name}?</h2><p>Se eliminarán membresías, pagos y referencias a vouchers. Esta acción no se puede deshacer.</p><div><button onClick={()=>setDeletingClient(null)}>Cancelar</button><button className="delete-confirm" onClick={deleteClientRecord}>Eliminar definitivamente</button></div></section></div>}
+
+    {cardOpen&&cardClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setCardOpen(false)}/><section className="card-modal"><header><div><span className="modal-kicker">TARJETA DIGITAL</span><h2>{cardClient.name}</h2></div><button className="close-button" onClick={()=>setCardOpen(false)}>×</button></header><div className="digital-card" ref={cardRef}><div className="card-top"><div className="mini-brand"><b>M</b><span>MONSTER<br/><small>GYM OS</small></span></div><span className="card-tier">{accessLabel(cardClient)}</span></div><div className="card-person"><ClientAvatar client={cardClient} className="card-photo"/><div><small>MIEMBRO</small><strong>{cardClient.name}</strong><p>{cardClient.plan}</p><code>ID {cardClient.token.slice(0,8).toUpperCase()}</code></div></div><div className="card-bottom"><div className="card-loyalty"><small>FIDELIDAD · {cardClient.stamps}/10 SELLOS</small><div className="mini-stamps">{Array.from({length:10},(_,index)=><i key={index} className={index<cardClient.stamps?"on":""}>{index<cardClient.stamps?"M":""}</i>)}</div></div><div className="qr-code">{qrDataUrl&&<img src={qrDataUrl} alt={`QR único de ${cardClient.name}`}/>}</div></div></div><p className="card-help">{cardClient.sessionLimit?`${cardClient.sessionsUsed}/${cardClient.sessionLimit} sesiones utilizadas. `:""}Vigente hasta {formatDate(cardClient.expiresAt)}.</p><div className="share-actions"><button className="download-button" onClick={downloadCard}>{downloadStatus==="working"?"Generando…":"↓ Descargar PNG"}</button><a className="whatsapp-button" target="_blank" rel="noreferrer" href={`https://wa.me/${cardClient.phone.replace(/\D/g,"")}`}>Abrir WhatsApp ↗</a></div></section></div>}
+
+    {scannerOpen&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={closeScanner}/><section className="scanner-modal"><header><div><span className="modal-kicker">RECEPCIÓN</span><h2>{scanStep==="success"?"Ingreso autorizado":scanStep==="blocked"?"Ingreso bloqueado":scanStep==="found"?"Cliente identificado":scanStep==="missing"?"Tarjeta no encontrada":"Escanear tarjeta"}</h2></div><button className="close-button" onClick={closeScanner}>×</button></header>
+      {scanStep==="camera"&&<div className="camera-content"><div className="camera-view real-camera"><div id="qr-reader"/><div className="camera-tip">Centra el QR dentro del marco</div></div>{scanError&&<p className="scan-error">{scanError}</p>}<form className="manual-scan" onSubmit={findManualClient}><input value={manualCode} onChange={(e)=>setManualCode(e.target.value)} placeholder="Código o teléfono"/><button>Buscar</button></form></div>}
+      {scanStep==="missing"&&<div className="missing-state"><div className="missing-symbol">!</div><h3>Cliente no encontrado</h3><button className="confirm-visit" onClick={closeScanner}>Entendido</button></div>}
+      {scanStep==="blocked"&&scannedClient&&<div className="blocked-state"><div className="blocked-symbol">!</div><span className="found-label">INGRESO BLOQUEADO</span><h3>{scannedClient.name}</h3><strong>{accessLabel(scannedClient)}</strong><p>{scannedClient.accessReason}</p>{scannedClient.balance>0&&<div className="block-debt"><span>Saldo pendiente</span><b>{money(scannedClient.balance)}</b><small>Tolerancia hasta {formatDate(scannedClient.graceUntil)}</small></div>}{scannedClient.sessionLimit&&<div className="block-debt"><span>Sesiones</span><b>{scannedClient.sessionsUsed}/{scannedClient.sessionLimit}</b></div>}<button className="confirm-visit" onClick={()=>{closeScanner();void openPayment(scannedClient);}}>Ir a cobro</button><button className="text-action" onClick={closeScanner}>Cerrar</button></div>}
+      {scanStep==="found"&&scannedClient&&<div className="found-client"><div className="member-hero"><ClientAvatar client={scannedClient} className="found-avatar"/><span className="verified">✓</span></div><span className="found-label">INGRESO HABILITADO</span><h3>{scannedClient.name}</h3><p>{scannedClient.plan} · Vence {formatDate(scannedClient.expiresAt)}</p><div className="access-facts"><div><span>Pago</span><strong>{paymentLabel(scannedClient)}</strong><small>{scannedClient.balance?`${money(scannedClient.balance)} pendiente`:"Sin saldo"}</small></div><div><span>Uso</span><strong>{scannedClient.sessionLimit?`${scannedClient.sessionsUsed}/${scannedClient.sessionLimit}`:`${scannedClient.visits}`}</strong><small>{scannedClient.sessionLimit?"sesiones":"visitas"}</small></div></div><button className="confirm-visit" onClick={confirmVisit}>Confirmar ingreso <span>＋1 visita</span></button><button className="text-action" onClick={()=>{scanHandledRef.current=false;visitSubmittingRef.current=false;setScanStep("camera");setScannedClient(null);}}>Escanear otro</button></div>}
+      {scanStep==="success"&&scannedClient&&<div className="success-state"><div className="success-burst">✓</div><span className="found-label">INGRESO AUTORIZADO</span><h3>{scannedClient.name}</h3><p>Visita registrada correctamente.<br/>{scannedClient.sessionLimit&&<strong>{scannedClient.sessionsUsed}/{scannedClient.sessionLimit} sesiones utilizadas</strong>}</p><div className="reward-chip"><span>✦</span><div><small>FIDELIDAD</small><strong>{scannedClient.stamps}/10 sellos</strong></div></div><button className="confirm-visit" onClick={closeScanner}>Listo, continuar</button></div>}
+    </section></div>}
   </main>;
 }

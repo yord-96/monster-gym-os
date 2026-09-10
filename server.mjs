@@ -19,11 +19,23 @@ if (process.env.NODE_ENV === "production" && (!adminPassword || !sessionSecret))
 }
 
 const db = openGymDatabase();
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-const app = spawn(npm, ["run", "app:start"], {
-  cwd: process.cwd(), stdio: "inherit",
-  env: { ...process.env, PORT: String(appPort), NODE_ENV: process.env.NODE_ENV || "production" },
-});
+const isWindows = process.platform === "win32";
+
+const app = spawn(
+  isWindows ? "cmd.exe" : "npm",
+  isWindows
+    ? ["/d", "/s", "/c", "npm run app:start"]
+    : ["run", "app:start"],
+  {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      PORT: String(appPort),
+      NODE_ENV: process.env.NODE_ENV || "production",
+    },
+  },
+);
 
 const uploadsRoot = resolve("uploads");
 mkdirSync(resolve(uploadsRoot, "payment-qr"), { recursive: true });

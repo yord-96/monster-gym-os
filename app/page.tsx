@@ -635,9 +635,10 @@ export default function Home() {
   }
 
   const dashboardView = <>
+    <div className="view-heading"><div><span className="view-kicker">RECEPCIÓN</span><h1>Tu gimnasio, al día</h1><p>Control de accesos, miembros y pagos en un solo lugar.</p></div><span className="today-label">{formatDate(new Date().toISOString())}</span></div>
     <section className="scanner-card">
-      <div className="scanner-copy"><span className="live-pill"><i/> ESCÁNER LISTO</span><h2>Registra una visita<br/>en segundos.</h2><p>El sistema valida vigencia, deuda, suspensión y límite de sesiones antes de permitir el ingreso.</p><button className="scan-button" onClick={openScanner}><span className="scan-symbol">⌗</span> Abrir escáner QR <b>→</b></button><small>{clients.length ? `${clients.length} clientes sincronizados` : "Primero registra un cliente"}</small></div>
-      <div className="scanner-visual" aria-hidden="true"><div className="glow-orb"/><div className="qr-frame"><i className="c1"/><i className="c2"/><i className="c3"/><i className="c4"/><div className="qr-grid">▦</div><span className="scan-line"/></div><div className="floating-card stamp-float"><span>✦</span><div><strong>Control automático</strong><small>Plan + deuda + sesiones</small></div></div></div>
+      <div className="scanner-copy"><span className="live-pill"><i/> CONTROL DE ACCESO</span><h2>Registra el próximo ingreso</h2><p>Verifica el plan, el saldo y las sesiones disponibles al escanear.</p><small>{clients.length ? `${clients.length} clientes sincronizados` : "Primero registra un cliente"}</small></div>
+      <div className="scanner-launch"><button className="scan-button" onClick={openScanner}><span className="scan-symbol">⌗</span> Abrir escáner QR <b>→</b></button><span>Validación automática de membresía</span></div>
     </section>
     <section className="metrics-grid">
       <article className="metric-card"><div className="metric-icon purple">↙</div><div className="metric-top"><span>Visitas hoy</span><small>{todayVisits ? "Actualizado" : "Sin actividad"}</small></div><strong>{todayVisits}</strong><p>Ingresos confirmados</p></article>
@@ -654,7 +655,7 @@ export default function Home() {
     <div className="view-heading"><div><span className="view-kicker">GESTIÓN DE MIEMBROS</span><h1>Clientes</h1><p>{clients.length} miembros en la base central.</p></div><button className="primary-button page-action" onClick={openNewClient}>＋ Nuevo cliente</button></div>
     <div className="list-toolbar"><div className="search-box">⌕<input value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="Buscar por nombre, teléfono o plan"/></div><span>{filteredClients.length} resultados</span></div>
     {filteredClients.length ? <div className="clients-table">
-      <div className="client-row table-head"><span>Cliente</span><span>Plan / pago</span><span>Uso</span><span>Estado</span><span/></div>
+      <div className="client-row table-head"><span>Cliente</span><span>Membresía / pago</span><span>Actividad</span><span>Estado</span><span>Acciones</span></div>
       {filteredClients.map((item)=><div className="client-row" key={item.id}>
         <div className="client-identity"><ClientAvatar client={item}/><div><strong>{item.name}</strong><small>{item.phone}</small></div></div>
         <div className="client-plan-cell"><strong>{item.plan}</strong><small>Vence {formatDate(item.expiresAt)}</small><em className={`payment-pill ${item.paymentStatus}`}>{paymentLabel(item)} · {item.balance ? `${money(item.balance)} saldo` : "sin saldo"}</em></div>
@@ -662,11 +663,13 @@ export default function Home() {
         <span className={`status-badge ${item.accessStatus}`}>{accessLabel(item)}</span>
         <div className="row-actions">
           <button onClick={()=>openPayment(item)}>Cobrar</button>
+          <details className="client-more" onBlur={(event)=>{if(!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open=false;}}><summary aria-label={`Más acciones para ${item.name}`} onKeyDown={(event)=>{if(event.key==="Escape"){const details=event.currentTarget.closest("details");if(details) details.open=false;}}}>Más <span aria-hidden="true">⌄</span></summary><div className="client-menu">
           <button onClick={()=>showCard(item)}>Tarjeta</button>
           <button onClick={()=>openRenew(item)}>Renovar</button>
           <button onClick={()=>openEditClient(item)}>Editar</button>
           <a className="row-link" target="_blank" rel="noreferrer" href={`https://wa.me/${item.phone.replace(/\D/g,"")}`}>WhatsApp</a>
           <button className="danger-action" onClick={()=>setDeletingClient(item)}>Eliminar</button>
+          </div></details>
           <button onClick={()=>{visitSubmittingRef.current=false;setScannedClient(item);setScanStep(item.accessStatus==="active"?"found":"blocked");setScannerOpen(true);}}>＋ Visita</button>
         </div>
       </div>)}

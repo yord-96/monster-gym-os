@@ -226,6 +226,7 @@ export default function Home() {
   const [plans, setPlans] = useState<PlanRecord[]>([]);
   const [settings, setSettings] = useState<AppSettings>({ paymentQrUrl: "" });
   const [search, setSearch] = useState("");
+  const [clientFilter, setClientFilter] = useState("all");
 
   const [clientOpen, setClientOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<ClientRecord | null>(null);
@@ -622,6 +623,14 @@ export default function Home() {
   const suspendedClients = clients.filter((item) => item.accessStatus === "debt_suspended" || item.accessStatus === "manual_suspended").length;
   const totalDebt = clients.reduce((sum, item) => sum + item.balance, 0);
   const filteredClients = useMemo(() => clients.filter((item) => `${item.name} ${item.phone} ${item.plan}`.toLowerCase().includes(search.toLowerCase())), [clients, search]);
+  const clientFilters = [
+    { id:"all", label:"Todos", matches: (_item: ClientRecord) => true },
+    { id:"active", label:"Activos", matches: (item: ClientRecord) => item.accessStatus === "active" },
+    { id:"suspended", label:"Suspendidos", matches: (item: ClientRecord) => ["manual_suspended", "debt_suspended"].includes(item.accessStatus) },
+    { id:"expired", label:"Vencidos", matches: (item: ClientRecord) => item.accessStatus === "expired" },
+    { id:"sessions", label:"Sin sesiones", matches: (item: ClientRecord) => item.accessStatus === "sessions_exhausted" },
+  ];
+  const mobileClients = filteredClients.filter(clientFilters.find(filter=>filter.id === clientFilter)?.matches ?? clientFilters[0].matches);
 
   if (authState !== "authenticated") {
     return <main className="login-shell">
@@ -659,10 +668,20 @@ export default function Home() {
     </section>
   </>;
 
-  const clientsView = <section className="view-page">
-    <div className="view-heading"><div><span className="view-kicker">GESTIÓN DE MIEMBROS</span><h1>Clientes</h1><p>{clients.length} miembros en la base central.</p></div><button className="primary-button page-action" onClick={openNewClient}>＋ Nuevo cliente</button></div>
+  const clientsView = <section className="view-page clients-page">
+    <div className="view-heading"><div><span className="view-kicker">GESTIÓN DE MIEMBROS</span><h1>Clientes</h1><p><span className="clients-desktop-subtitle">{clients.length} miembros en la base central.</span><span className="clients-mobile-subtitle">Gestiona miembros, planes y pagos.</span></p></div><button className="primary-button page-action" onClick={openNewClient}>＋ Nuevo cliente</button></div>
     <div className="list-toolbar"><div className="search-box">⌕<input value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="Buscar por nombre, teléfono o plan"/></div><span>{filteredClients.length} resultados</span></div>
-    {filteredClients.length ? <div className="clients-table">
+    <div className="mobile-clients-content">
+      <div className="client-filter-tabs" aria-label="Filtrar clientes por estado">{clientFilters.filter(filter=>filter.id!=="sessions" || clients.some(filter.matches)).map(filter=><button key={filter.id} className={`filter-${filter.id}`} aria-pressed={clientFilter===filter.id} onClick={()=>setClientFilter(filter.id)}>{filter.label}<span>{clients.filter(filter.matches).length}</span></button>)}</div>
+      <div className="mobile-client-list">{mobileClients.map(item=><article className="member-tile" key={item.id}>
+        <header className="member-tile-heading"><ClientAvatar client={item}/><div><h2>{item.name}</h2><a href={`tel:${item.phone.replace(/[^\d+]/g,"")}`}>{item.phone}</a></div><span className={`member-state ${item.accessStatus}`}>{accessLabel(item)}</span><button className="member-open" aria-label={`Ver tarjeta de ${item.name}`} onClick={()=>showCard(item)}>›</button></header>
+        <div className="member-facts"><div><p><MobileIcon name="plans"/><span>Plan {item.plan}</span></p><p><MobileIcon name="check"/><span>Vence {formatDate(item.expiresAt)}</span></p></div><div><p><MobileIcon name="users"/><span>{item.sessionLimit ? `${item.sessionsUsed}/${item.sessionLimit} sesiones` : `${item.visits} visita${item.visits===1?"":"s"}`}</span></p><p><MobileIcon name="star"/><span>{item.stamps}/10 sellos</span></p></div></div>
+        <footer className="member-tile-footer"><button className={`member-balance ${item.paymentStatus}`} onClick={()=>openPayment(item)}><strong>{paymentLabel(item)}</strong> {item.balance ? `${money(item.balance)} saldo` : "Sin saldo"}</button><details className="member-options" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))event.currentTarget.open=false;}}><summary aria-label={`Acciones de ${item.name}`} onKeyDown={event=>{if(event.key==="Escape"){const details=event.currentTarget.closest("details");if(details)details.open=false;}}}><MobileIcon name="more"/></summary><div className="member-options-menu"><button onClick={()=>openPayment(item)}>Registrar pago</button><button onClick={()=>{visitSubmittingRef.current=false;setScannedClient(item);setScanStep(item.accessStatus==="active"?"found":"blocked");setScannerOpen(true);}}>Registrar visita</button><button onClick={()=>showCard(item)}>Ver tarjeta</button><button onClick={()=>openRenew(item)}>Renovar plan</button><button onClick={()=>openEditClient(item)}>Editar cliente</button><a target="_blank" rel="noreferrer" href={`https://wa.me/${item.phone.replace(/\D/g,"")}`}>WhatsApp</a><button className="member-delete" onClick={()=>setDeletingClient(item)}>Eliminar cliente</button></div></details></footer>
+      </article>)}</div>
+      {!mobileClients.length&&<div className="member-empty"><MobileIcon name="users"/><h2>{clients.length ? "Sin coincidencias" : "Todavía no hay clientes"}</h2><p>{clients.length ? "Prueba otro nombre o estado." : "Registra tu primer miembro para comenzar."}</p><button onClick={()=>{if(clients.length){setSearch("");setClientFilter("all");}else openNewClient();}}>{clients.length ? "Mostrar todos" : "Nuevo cliente"}</button></div>}
+      <div className="member-list-summary" role="status"><MobileIcon name="users"/><strong>{mobileClients.length === clients.length ? `${clients.length} clientes en la base central` : `${mobileClients.length} de ${clients.length} clientes`}</strong><span>{centralLoaded&&!centralError ? "Miembros actualizados y sincronizados." : "Consulta el estado de sincronización."}</span></div>
+    </div>
+    {filteredClients.length ? <div className="clients-table desktop-client-list">
       <div className="client-row table-head"><span>Cliente</span><span>Membresía / pago</span><span>Actividad</span><span>Estado</span><span>Acciones</span></div>
       {filteredClients.map((item)=><div className="client-row" key={item.id}>
         <div className="client-identity"><ClientAvatar client={item}/><div><strong>{item.name}</strong><small>{item.phone}</small></div></div>
@@ -681,7 +700,7 @@ export default function Home() {
           <button onClick={()=>{visitSubmittingRef.current=false;setScannedClient(item);setScanStep(item.accessStatus==="active"?"found":"blocked");setScannerOpen(true);}}>＋ Visita</button>
         </div>
       </div>)}
-    </div> : <div className="big-empty"><span>♙</span><h2>No hay clientes</h2><p>Registra el primero para comenzar.</p><button onClick={openNewClient}>Registrar cliente</button></div>}
+    </div> : <div className="big-empty desktop-client-list"><span>♙</span><h2>No hay clientes</h2><p>Registra el primero para comenzar.</p><button onClick={openNewClient}>Registrar cliente</button></div>}
   </section>;
 
   const plansView = <section className="view-page">
@@ -705,8 +724,8 @@ export default function Home() {
 
   const content: Record<View, React.ReactNode> = { inicio: dashboardView, clientes: clientsView, planes: plansView, fidelidad: loyaltyView, asistencias: attendanceView, cobros: cobrosView, reportes: reportsView };
 
-  return <main className={`app-shell ${view === "inicio" ? "mobile-home" : ""}`}>
-    {view === "inicio" && <><header className="mobile-home-topbar mobile-home-only"><div className="mobile-brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div><div className="mobile-header-actions"><button aria-label="Buscar clientes" onClick={()=>go("clientes")}><MobileIcon name="search"/></button><button aria-label="Ver actividad reciente" onClick={()=>go("asistencias")}><MobileIcon name="bell"/></button><button className="mobile-profile" aria-label="Abrir menú de administrador" onClick={()=>setSidebarOpen(true)}>MO</button></div></header><nav className="mobile-bottom-nav mobile-home-only" aria-label="Navegación móvil">{([{view:"inicio",label:"Inicio",icon:"home"},{view:"clientes",label:"Clientes",icon:"users"},{view:"asistencias",label:"Asistencias",icon:"check"},{view:"cobros",label:"Cobros",icon:"money"}] as const).map((item)=><button key={item.view} aria-current={view===item.view ? "page" : undefined} onClick={()=>go(item.view)}><MobileIcon name={item.icon}/><span>{item.label}</span></button>)}<button onClick={()=>setSidebarOpen(true)}><MobileIcon name="more"/><span>Más</span></button></nav></>}
+  return <main className={`app-shell ${view === "inicio" ? "mobile-home" : view === "clientes" ? "mobile-home mobile-clients" : ""}`}>
+    {(view === "inicio" || view === "clientes") && <><header className="mobile-home-topbar mobile-home-only"><div className="mobile-brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div><div className="mobile-header-actions"><button aria-label="Buscar clientes" onClick={()=>{go("clientes");requestAnimationFrame(()=>document.querySelector<HTMLInputElement>(".clients-page .search-box input")?.focus());}}><MobileIcon name="search"/></button><button aria-label="Ver actividad reciente" onClick={()=>go("asistencias")}><MobileIcon name="bell"/></button><button className="mobile-profile" aria-label="Abrir menú de administrador" onClick={()=>setSidebarOpen(true)}>MO</button></div></header><nav className="mobile-bottom-nav mobile-home-only" aria-label="Navegación móvil">{([{view:"inicio",label:"Inicio",icon:"home"},{view:"clientes",label:"Clientes",icon:"users"},{view:"planes",label:"Planes",icon:"plans"},{view:"cobros",label:"Cobros",icon:"money"}] as const).map((item)=><button key={item.view} aria-current={view===item.view ? "page" : undefined} onClick={()=>go(item.view)}><MobileIcon name={item.icon}/><span>{item.label}</span></button>)}<button onClick={()=>setSidebarOpen(true)}><MobileIcon name="more"/><span>Más</span></button></nav></>}
     <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
       <div className="brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div>
       <nav aria-label="Navegación principal">

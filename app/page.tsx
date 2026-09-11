@@ -162,6 +162,11 @@ const accessLabel = (client: ClientRecord) => {
 
 const paymentLabel = (client: ClientRecord) => client.paymentStatus === "paid" ? "PAGADO" : client.paymentStatus === "partial" ? "PAGO PARCIAL" : "DEBE";
 
+function MobileIcon({ name }: { name: "home" | "users" | "check" | "money" | "more" | "search" | "bell" | "qr" | "plans" | "star" }) {
+  const paths = { home:"M3 10 12 3l9 7M5 9v12h5v-7h4v7h5V9", users:"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 4a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0", check:"M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2M7 12l3 3 7-7", money:"M12 2v20M17 5H9a4 4 0 0 0 0 8h6a3 3 0 0 1 0 6H6", more:"M4 12h.01M12 12h.01M20 12h.01", search:"M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0", bell:"M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4", qr:"M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5M8 8h2v2H8zM15 8h2v2h-2zM8 15h2v2H8zM15 15h2v2h-2z", plans:"M3 9v6M7 5v14M7 12h10M17 5v14M21 9v6", star:"m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z" };
+  return <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={name === "more" ? 4 : 1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]}/></svg>;
+}
+
 function ClientAvatar({ client, className = "" }: { client: ClientRecord; className?: string }) {
   return client.photo
     ? <img className={className} src={client.photo} alt={`Foto de ${client.name}`}/>
@@ -635,19 +640,22 @@ export default function Home() {
   }
 
   const dashboardView = <>
+    <div className="mobile-home-heading mobile-home-only"><div><h1>Monster Gym —<br/>Sucursal Central</h1><p><span className="status-dot"/> Sucursal activa <span className="mobile-date">{formatDate(new Date().toISOString())}</span></p></div><button onClick={openNewClient}><MobileIcon name="users"/> Nuevo cliente</button></div>
     <div className="view-heading"><div><span className="view-kicker">RECEPCIÓN</span><h1>Tu gimnasio, al día</h1><p>Control de accesos, miembros y pagos en un solo lugar.</p></div><span className="today-label">{formatDate(new Date().toISOString())}</span></div>
     <section className="scanner-card">
-      <div className="scanner-copy"><span className="live-pill"><i/> CONTROL DE ACCESO</span><h2>Registra el próximo ingreso</h2><p>Verifica el plan, el saldo y las sesiones disponibles al escanear.</p><small>{clients.length ? `${clients.length} clientes sincronizados` : "Primero registra un cliente"}</small></div>
-      <div className="scanner-launch"><button className="scan-button" onClick={openScanner}><span className="scan-symbol">⌗</span> Abrir escáner QR <b>→</b></button><span>Validación automática de membresía</span></div>
+      <div className="scanner-copy"><span className="live-pill"><i/> CONTROL DE ACCESO</span><h2>Registra el próximo ingreso</h2><p>Verifica el plan, el saldo y las sesiones disponibles al escanear.</p><small><span className="mobile-member-stack mobile-home-only" aria-hidden="true">{clients.slice(0,3).map(client=><ClientAvatar key={client.id} client={client}/>)}</span>{clients.length ? `${clients.length} clientes sincronizados` : "Primero registra un cliente"}</small></div>
+      <div className="scanner-launch"><div className="mobile-qr-emblem mobile-home-only"><MobileIcon name="qr"/></div><button className="scan-button" onClick={openScanner}><span className="scan-symbol">⌗</span> Abrir escáner QR <b>→</b></button><span>Validación automática de membresía</span></div>
     </section>
     <section className="metrics-grid">
       <article className="metric-card"><div className="metric-icon purple">↙</div><div className="metric-top"><span>Visitas hoy</span><small>{todayVisits ? "Actualizado" : "Sin actividad"}</small></div><strong>{todayVisits}</strong><p>Ingresos confirmados</p></article>
       <article className="metric-card"><div className="metric-icon lime">♙</div><div className="metric-top"><span>Miembros habilitados</span><small>{clients.length} total</small></div><strong>{activeClients}</strong><p>{suspendedClients} suspendidos</p></article>
       <article className="metric-card"><div className="metric-icon coral">$</div><div className="metric-top"><span>Saldo por cobrar</span><small>Actual</small></div><strong>{money(totalDebt)}</strong><p>Deuda acumulada en membresías vigentes</p></article>
     </section>
+    <div className="mobile-shortcuts mobile-home-only"><button onClick={()=>go("planes")}><span><MobileIcon name="plans"/></span><div><strong>Planes</strong><small>Gestiona membresías</small></div><b>›</b></button><button onClick={()=>go("fidelidad")}><span><MobileIcon name="star"/></span><div><strong>Fidelidad</strong><small>Premia a tus clientes</small></div><b>›</b></button></div>
     <section className="bottom-grid">
       <article className="panel activity-panel"><div className="panel-head"><div><h3>Actividad reciente</h3><p>Movimientos de recepción</p></div><button onClick={() => go("asistencias")}>Ver todo →</button></div>{activities.length ? <div className="activity-list">{activities.slice(0,5).map((item) => <div className="activity" key={item.id}><span className="avatar violet">{initials(item.clientName)}</span><div><strong>{item.clientName}</strong><p>{item.description}</p></div><time>{formatDateTime(item.createdAt)}</time></div>)}</div> : <div className="activity-empty"><span>⌁</span><div><strong>Historial listo</strong><p>Las visitas aparecerán aquí.</p></div></div>}</article>
       <article className="panel debt-panel"><div className="panel-head"><div><h3>Control de pagos</h3><p>Tolerancia máxima de 14 días</p></div><button onClick={() => go("cobros")}>Abrir cobros →</button></div><div className="debt-summary"><strong>{money(totalDebt)}</strong><span>saldo total pendiente</span><div><b>{clients.filter((item)=>item.paymentStatus==="partial").length}</b> parciales · <b>{clients.filter((item)=>item.paymentStatus==="due").length}</b> sin pago</div></div></article>
+      <button className="mobile-growth mobile-home-only" onClick={()=>go("reportes")}><MobileIcon name="star"/><strong>Haz crecer tu gimnasio</strong><span>Conoce tus miembros, visitas y pagos.</span><b>Ver reportes →</b></button>
     </section>
   </>;
 
@@ -697,7 +705,8 @@ export default function Home() {
 
   const content: Record<View, React.ReactNode> = { inicio: dashboardView, clientes: clientsView, planes: plansView, fidelidad: loyaltyView, asistencias: attendanceView, cobros: cobrosView, reportes: reportsView };
 
-  return <main className="app-shell">
+  return <main className={`app-shell ${view === "inicio" ? "mobile-home" : ""}`}>
+    {view === "inicio" && <><header className="mobile-home-topbar mobile-home-only"><div className="mobile-brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div><div className="mobile-header-actions"><button aria-label="Buscar clientes" onClick={()=>go("clientes")}><MobileIcon name="search"/></button><button aria-label="Ver actividad reciente" onClick={()=>go("asistencias")}><MobileIcon name="bell"/></button><button className="mobile-profile" aria-label="Abrir menú de administrador" onClick={()=>setSidebarOpen(true)}>MO</button></div></header><nav className="mobile-bottom-nav mobile-home-only" aria-label="Navegación móvil">{([{view:"inicio",label:"Inicio",icon:"home"},{view:"clientes",label:"Clientes",icon:"users"},{view:"asistencias",label:"Asistencias",icon:"check"},{view:"cobros",label:"Cobros",icon:"money"}] as const).map((item)=><button key={item.view} aria-current={view===item.view ? "page" : undefined} onClick={()=>go(item.view)}><MobileIcon name={item.icon}/><span>{item.label}</span></button>)}<button onClick={()=>setSidebarOpen(true)}><MobileIcon name="more"/><span>Más</span></button></nav></>}
     <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
       <div className="brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div>
       <nav aria-label="Navegación principal">

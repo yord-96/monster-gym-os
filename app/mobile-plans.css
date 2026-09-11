@@ -1,0 +1,262 @@
+/* Mobile Plans — isolated from desktop and matched to the current Monster Gym mobile UI. */
+@media (max-width:760px) {
+  .mobile-plans .dashboard { width:calc(100% - 24px); padding-top:6px; padding-bottom:calc(84px + env(safe-area-inset-bottom)); }
+  .mobile-plans .plans-page { min-height:0; padding-bottom:16px; }
+
+  .mobile-plans .plans-page>.view-heading {
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    align-items:center;
+    gap:10px;
+    margin:8px 0 14px;
+  }
+  .mobile-plans .plans-page .view-kicker { display:none; }
+  .mobile-plans .plans-desktop-subtitle,.mobile-plans .plans-desktop-copy { display:none; }
+  .mobile-plans .plans-mobile-subtitle,.mobile-plans .plans-mobile-copy { display:block!important; }
+  .mobile-plans .plans-page .view-heading h1 {
+    margin:0;
+    color:#f7f8fc;
+    font-size:clamp(1.75rem,7vw,2.35rem);
+    line-height:1.05;
+    letter-spacing:-.045em;
+    font-weight:780;
+  }
+  .mobile-plans .plans-page .view-heading p {
+    margin:6px 0 0;
+    color:#afbdd8;
+    font-size:.8125rem;
+    line-height:1.35;
+  }
+  .mobile-plans .plans-page .page-action {
+    position:static;
+    width:auto!important;
+    min-height:42px;
+    height:auto!important;
+    padding:9px 12px!important;
+    border:1px solid #d4ff72;
+    border-radius:10px!important;
+    background:linear-gradient(125deg,#d7ff67,#b8f051);
+    color:#101806;
+    box-shadow:0 0 24px #a9ef3424;
+    font-size:.8125rem!important;
+    font-weight:800;
+    white-space:nowrap;
+  }
+
+  .mobile-plan-summary {
+    width:100%;
+    display:grid!important;
+    grid-template-columns:42px minmax(0,1fr) auto;
+    align-items:center;
+    gap:11px;
+    margin:0 0 12px;
+    padding:13px 13px;
+    border:1px solid #33485b;
+    border-radius:13px;
+    background:radial-gradient(ellipse at 0% 50%,#7caf2830,transparent 48%),linear-gradient(120deg,#17232d,#101a24);
+    color:#eff5ff;
+    text-align:left;
+  }
+  .mobile-plan-summary>span {
+    width:42px;
+    height:42px;
+    display:grid;
+    place-items:center;
+    border:1px solid #486837;
+    border-radius:12px;
+    background:linear-gradient(145deg,#233c2c,#1b3226);
+    color:#c9fa58;
+  }
+  .mobile-plan-summary>span svg { width:23px; height:23px; }
+  .mobile-plan-summary>div { min-width:0; }
+  .mobile-plan-summary strong,.mobile-plan-summary small { display:block; }
+  .mobile-plan-summary strong { font-size:.9375rem; line-height:1.2; }
+  .mobile-plan-summary small { margin-top:4px; color:#aebdda; font-size:.75rem; line-height:1.3; }
+  .mobile-plan-summary>b { color:#a9bce1; font-size:1.9rem; font-weight:300; line-height:1; }
+
+  .mobile-plans .plan-grid { display:grid; grid-template-columns:1fr; gap:10px; }
+  .mobile-plans .plan-card {
+    min-height:0;
+    display:grid;
+    grid-template-columns:62px minmax(0,1fr) auto;
+    grid-template-rows:auto auto auto auto;
+    column-gap:12px;
+    row-gap:6px;
+    position:relative;
+    overflow:hidden;
+    padding:14px 12px 13px;
+    border:1px solid #31465a;
+    border-top:1px solid #3a5064;
+    border-radius:14px;
+    background:
+      radial-gradient(ellipse at 100% 0%,#6d9e2135,transparent 45%),
+      linear-gradient(125deg,#17232d 0%,#101a24 100%);
+    box-shadow:none;
+    color:#f6f8ff;
+  }
+  .mobile-plans .plan-card::after {
+    content:"";
+    position:absolute;
+    right:-28px;
+    top:-45px;
+    width:120px;
+    height:180px;
+    transform:rotate(38deg);
+    background:linear-gradient(90deg,transparent,#8bc62e12,transparent);
+    pointer-events:none;
+  }
+  .mobile-plans .plan-card.plan-popular {
+    border-color:#a8f234;
+    box-shadow:0 0 0 1px #99e82f55,0 0 24px #89d72d24;
+    background:
+      radial-gradient(ellipse at 100% 0%,#84c92850,transparent 55%),
+      radial-gradient(ellipse at 20% 100%,#7bb22524,transparent 52%),
+      linear-gradient(125deg,#17252b,#101b22);
+  }
+  .mobile-plans .plan-card.plan-disabled { opacity:.72; }
+
+  .mobile-plans .plan-symbol {
+    grid-column:1;
+    grid-row:1 / span 2;
+    align-self:start;
+    width:54px;
+    height:54px;
+    margin:0;
+    display:grid;
+    place-items:center;
+    border:1px solid #5b4a96;
+    border-radius:14px;
+    background:linear-gradient(145deg,#352a58,#282249);
+    color:#aa76ff;
+    font-size:2.1rem;
+    line-height:1;
+  }
+  .mobile-plans .plan-card>small {
+    grid-column:2;
+    grid-row:1;
+    align-self:end;
+    margin:0;
+    color:#acb9d8;
+    font-size:.75rem;
+    line-height:1.1;
+    letter-spacing:.1em;
+    font-weight:800;
+  }
+  .mobile-plans .plan-card h2 {
+    grid-column:2;
+    grid-row:2;
+    margin:0;
+    color:#f6f8ff;
+    font-size:1.17rem;
+    line-height:1.15;
+    letter-spacing:-.02em;
+    font-weight:760;
+  }
+  .mobile-plan-popular {
+    grid-column:3;
+    grid-row:1 / span 2;
+    align-self:center;
+    justify-self:end;
+    display:flex!important;
+    align-items:center;
+    gap:6px;
+    min-height:31px;
+    padding:6px 9px;
+    border:1px solid #c8ff5e;
+    border-radius:999px;
+    background:#c7f85c;
+    color:#142006;
+    font-size:.75rem;
+    font-weight:800;
+    white-space:nowrap;
+  }
+  .mobile-plan-popular svg { width:14px; height:14px; fill:currentColor; }
+
+  .mobile-plans .plan-card>strong {
+    grid-column:1 / 3;
+    grid-row:3;
+    margin:8px 0 1px;
+    color:#f8f9ff;
+    font-size:clamp(1.55rem,7vw,2.1rem);
+    line-height:1.08;
+    letter-spacing:-.045em;
+    font-weight:800;
+    overflow-wrap:anywhere;
+  }
+  .mobile-plans .plan-card>p {
+    margin:0;
+    color:#b9c6de;
+    font-size:.8125rem;
+    line-height:1.25;
+  }
+  .mobile-plans .plan-card>p:nth-of-type(1) {
+    grid-column:1 / 3;
+    grid-row:4;
+    justify-self:start;
+    display:inline-flex;
+    align-items:center;
+    min-height:32px;
+    padding:6px 10px;
+    border:1px solid #415063;
+    border-radius:999px;
+    background:#202b37;
+    color:#dce4f5;
+  }
+  .mobile-plans .plan-card.plan-unlimited>p:nth-of-type(1) { border-color:#3e6234; background:#223c24; color:#d1f474; }
+  .mobile-plans .plan-card>p:nth-of-type(1)::before { content:"∞"; margin-right:8px; color:#c8f45a; font-size:1.2rem; line-height:1; font-weight:800; }
+  .mobile-plans .plan-card.plan-sessions>p:nth-of-type(1)::before { content:"▱"; color:#b68cff; font-size:1rem; }
+  .mobile-plans .plan-card>p:nth-of-type(2) {
+    grid-column:1 / 3;
+    grid-row:5;
+    margin-top:3px;
+    padding-left:4px;
+    color:#aebddd;
+  }
+  .mobile-plans .plan-card>p:nth-of-type(2)::before { content:"♙"; margin-right:8px; color:#a9b7ff; font-size:1rem; }
+
+  .mobile-plan-chevron {
+    grid-column:3;
+    grid-row:3;
+    align-self:center;
+    justify-self:end;
+    display:block!important;
+    color:#a8bdf0;
+    font-size:2.2rem;
+    font-weight:300;
+    line-height:1;
+  }
+  .mobile-plans .plan-card>button {
+    grid-column:3;
+    grid-row:4 / span 2;
+    align-self:end;
+    min-width:112px;
+    min-height:38px;
+    margin:0;
+    padding:8px 11px;
+    border:1px solid #44526b;
+    border-radius:10px;
+    background:#182333;
+    color:#b986ff;
+    font-size:.8125rem;
+    font-weight:760;
+    text-align:center;
+    white-space:nowrap;
+  }
+
+  .mobile-plans .plan-card.plan-disabled>button { color:#bd91ff; }
+
+  .mobile-plans .mobile-bottom-nav button[aria-current=page] {
+    color:#d5f868;
+    background:linear-gradient(#b5eb3a0a,#a8d83815);
+    border-color:#a9d83e26;
+  }
+}
+
+@media (max-width:370px) {
+  .mobile-plans .plans-page>.view-heading { grid-template-columns:1fr; }
+  .mobile-plans .plans-page .page-action { justify-self:start; }
+  .mobile-plans .plan-card { grid-template-columns:54px minmax(0,1fr) auto; column-gap:9px; padding-left:10px; padding-right:10px; }
+  .mobile-plans .plan-symbol { width:48px; height:48px; }
+  .mobile-plan-popular { padding:5px 7px; font-size:.7rem; }
+  .mobile-plans .plan-card>button { min-width:104px; padding-left:8px; padding-right:8px; }
+}

@@ -1,0 +1,161 @@
+/* Shared 2026 mobile navigation. Desktop is untouched. */
+@media (max-width:760px) {
+  /* The new mobile header/nav is the navigation source of truth on every section. */
+  .app-shell>.mobile-home-topbar { display:flex; }
+  .app-shell>.mobile-bottom-nav { display:grid; }
+  .app-shell .dashboard { padding-bottom:calc(96px + env(safe-area-inset-bottom)); }
+
+  /* On legacy mobile sections hide the desktop top bar while keeping their content. */
+  .app-shell:not(.mobile-home) .topbar { display:none; }
+  .app-shell:not(.mobile-home) .main-content { width:100%; margin-left:0; }
+
+  .mobile-bottom-nav {
+    grid-template-columns:repeat(5,minmax(0,1fr));
+  }
+
+  .mobile-bottom-nav button[aria-current=page] {
+    color:#d5f868;
+    background:linear-gradient(#b5eb3a0a,#a8d83815);
+    border-color:#a9d83e26;
+  }
+  .mobile-bottom-nav button[aria-current=page] svg { fill:currentColor; }
+
+  /* "Más" now opens a bottom sheet instead of the desktop sidebar. */
+  .mobile-more-layer {
+    position:fixed;
+    inset:0;
+    z-index:120;
+    display:block!important;
+  }
+  .mobile-more-scrim {
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    border:0;
+    background:#05080db8;
+    backdrop-filter:blur(6px);
+    -webkit-backdrop-filter:blur(6px);
+  }
+  .mobile-more-sheet {
+    position:absolute;
+    left:0;
+    right:0;
+    bottom:0;
+    padding:8px 14px calc(16px + env(safe-area-inset-bottom));
+    border:1px solid #344252;
+    border-bottom:0;
+    border-radius:24px 24px 0 0;
+    background:
+      radial-gradient(ellipse at 90% 0%,#334a2450,transparent 45%),
+      linear-gradient(180deg,#151d27,#0e151e);
+    box-shadow:0 -20px 60px #0008;
+    color:#f6f8ff;
+    animation:mobile-more-in .18s ease-out;
+  }
+  .mobile-more-handle {
+    width:42px;
+    height:4px;
+    margin:0 auto 12px;
+    border-radius:999px;
+    background:#536071;
+  }
+  .mobile-more-sheet>header {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:10px;
+  }
+  .mobile-more-sheet>header small {
+    display:block;
+    color:#aab7d0;
+    font-size:.6875rem;
+    letter-spacing:.12em;
+    font-weight:800;
+  }
+  .mobile-more-sheet>header h2 {
+    margin:3px 0 0;
+    font-size:1.25rem;
+    letter-spacing:-.03em;
+  }
+  .mobile-more-sheet>header>button {
+    width:38px;
+    height:38px;
+    display:grid;
+    place-items:center;
+    border:1px solid #394858;
+    border-radius:50%;
+    background:#1d2732;
+    color:#d9e0ee;
+    font-size:1.35rem;
+  }
+
+  .mobile-more-sheet>nav {
+    display:grid;
+    gap:8px;
+  }
+  .mobile-more-sheet>nav>button {
+    width:100%;
+    min-height:62px;
+    display:grid;
+    grid-template-columns:42px minmax(0,1fr) auto;
+    align-items:center;
+    gap:11px;
+    padding:9px 11px;
+    border:1px solid #2f3d4c;
+    border-radius:14px;
+    background:#151f29;
+    color:#edf2fc;
+    text-align:left;
+  }
+  .mobile-more-sheet>nav>button.active {
+    border-color:#698744;
+    background:linear-gradient(120deg,#1a2b25,#18242b);
+    box-shadow:inset 3px 0 #c8f45a;
+  }
+  .mobile-more-sheet>nav>button>span {
+    width:42px;
+    height:42px;
+    display:grid;
+    place-items:center;
+    border-radius:12px;
+    background:#222e3a;
+    color:#bfa1ff;
+  }
+  .mobile-more-sheet>nav>button.active>span { color:#c8f45a; background:#243524; }
+  .mobile-more-sheet>nav strong,.mobile-more-sheet>nav small { display:block; }
+  .mobile-more-sheet>nav strong { font-size:.9375rem; }
+  .mobile-more-sheet>nav small { margin-top:2px; color:#a9b6cf; font-size:.75rem; }
+  .mobile-more-sheet>nav b { color:#aab9d8; font-size:1.6rem; font-weight:300; }
+
+  .mobile-more-logout {
+    width:100%;
+    min-height:58px;
+    display:grid;
+    grid-template-columns:38px minmax(0,1fr) auto;
+    align-items:center;
+    gap:10px;
+    margin-top:10px;
+    padding:9px 11px;
+    border:1px solid #493b47;
+    border-radius:14px;
+    background:#211a20;
+    color:#f4edf1;
+    text-align:left;
+  }
+  .mobile-more-logout .avatar { width:36px; height:36px; }
+  .mobile-more-logout strong,.mobile-more-logout small { display:block; }
+  .mobile-more-logout strong { font-size:.875rem; }
+  .mobile-more-logout small { margin-top:2px; color:#bfaeb9; font-size:.75rem; }
+  .mobile-more-logout>b { color:#ff9a9a; font-size:.75rem; }
+
+  /* Never slide the desktop sidebar in from the left on phone. */
+  .app-shell>.sidebar.open { transform:translateX(-100%); }
+  .app-shell>.backdrop { display:none; }
+}
+
+@keyframes mobile-more-in {
+  from { transform:translateY(24px); opacity:.7; }
+  to { transform:translateY(0); opacity:1; }
+}

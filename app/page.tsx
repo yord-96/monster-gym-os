@@ -213,6 +213,7 @@ function LoyaltyGalleryCard({ client, onOpen, onVisit }: { client: ClientRecord;
 export default function Home() {
   const [view, setView] = useState<View>("inicio");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [authState, setAuthState] = useState<"checking" | "login" | "authenticated">("checking");
   const [loginPassword, setLoginPassword] = useState("");
@@ -427,6 +428,7 @@ export default function Home() {
     location.hash = next;
     setView(next);
     setSidebarOpen(false);
+    setMobileMoreOpen(false);
   };
 
   const openNewClient = () => {
@@ -715,7 +717,15 @@ export default function Home() {
     <div className="plan-grid">{plans.map((plan)=>{const memberCount=clients.filter((item)=>item.planId===plan.id).length; const popular=plan.active&&plan.id===mostPopularPlanId&&memberCount>0; return <article className={`plan-card ${plan.active ? "" : "plan-disabled"} ${popular ? "plan-popular" : ""} ${plan.billingType === "sessions" ? "plan-sessions" : "plan-unlimited"}`} key={plan.id}><span className="plan-symbol purple">◇</span><small>{plan.durationMonths} MES{plan.durationMonths===1?"":"ES"}</small><h2>{plan.name}</h2>{popular&&<span className="mobile-plan-popular mobile-home-only"><MobileIcon name="star"/> Más popular</span>}<strong>{plan.price > 0 ? money(plan.price) : "PRECIO POR DEFINIR"}</strong><p>{plan.billingType==="sessions" ? `${plan.sessionLimit} ingresos por período` : <><span className="plans-desktop-copy">Ingresos ilimitados durante la vigencia</span><span className="plans-mobile-copy mobile-home-only">Ingresos ilimitados</span></>}</p><p>{memberCount} miembros actuales</p><span className="mobile-plan-chevron mobile-home-only">›</span><button onClick={()=>openEditPlan(plan)}>Editar plan →</button></article>})}</div>
   </section>;
 
-  const loyaltyView = <section className="view-page loyalty-page"><div className="view-heading"><div><span className="view-kicker">GALERÍA DE TARJETAS</span><h1>Fidelidad</h1><p>QR único y sellos de cada miembro.</p></div></div><div className="list-toolbar loyalty-toolbar"><div className="search-box">⌕<input value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="Buscar tarjeta"/></div></div>{filteredClients.length ? <div className="loyalty-gallery">{filteredClients.map((item)=><LoyaltyGalleryCard client={item} key={item.id} onOpen={showCard} onVisit={(client)=>{setScannedClient(client);setScanStep(client.accessStatus==="active"?"found":"blocked");setScannerOpen(true);}}/>)}</div> : <div className="big-empty"><span>✦</span><h2>Sin tarjetas</h2></div>}</section>;
+  const activeLoyaltyCards = filteredClients.filter((item)=>item.accessStatus==="active").length;
+  const loyaltyView = <section className="view-page loyalty-page">
+    <div className="view-heading"><div><span className="view-kicker">GALERÍA DE TARJETAS</span><h1>Fidelidad</h1><p>QR único y sellos de cada miembro.</p></div></div>
+    <div className="list-toolbar loyalty-toolbar"><div className="search-box"><MobileIcon name="search"/><input value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="Buscar tarjeta"/></div></div>
+    {filteredClients.length ? <>
+      <div className="loyalty-gallery">{filteredClients.map((item)=><LoyaltyGalleryCard client={item} key={item.id} onOpen={showCard} onVisit={(client)=>{setScannedClient(client);setScanStep(client.accessStatus==="active"?"found":"blocked");setScannerOpen(true);}}/>)}</div>
+      <div className="mobile-loyalty-summary mobile-home-only" role="status"><span><MobileIcon name="users"/></span><div><strong>{activeLoyaltyCards} tarjetas activas</strong><small>Miembros con programa de fidelidad</small></div><b>›</b></div>
+    </> : <div className="big-empty"><span>✦</span><h2>Sin tarjetas</h2></div>}
+  </section>;
 
   const attendanceView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">OPERACIÓN</span><h1>Asistencias</h1><p>El ingreso se bloquea automáticamente si el plan venció, agotó sesiones o superó los 14 días de tolerancia con deuda.</p></div><button className="primary-button page-action" onClick={openScanner}>⌗ Escanear QR</button></div>{activities.length ? <div className="history-list">{activities.map((item)=><article key={item.id}><span className={`history-icon ${item.type}`}>{item.type==="registro"?"＋":item.type==="premio"?"✦":"✓"}</span><div><strong>{item.clientName}</strong><p>{item.description}</p></div><time>{formatDateTime(item.createdAt)}</time></article>)}</div> : <div className="big-empty"><span>✓</span><h2>Aún no hay movimientos</h2></div>}</section>;
 
@@ -731,8 +741,24 @@ export default function Home() {
 
   const content: Record<View, React.ReactNode> = { inicio: dashboardView, clientes: clientsView, planes: plansView, fidelidad: loyaltyView, asistencias: attendanceView, cobros: cobrosView, reportes: reportsView };
 
-  return <main className={`app-shell ${view === "inicio" ? "mobile-home" : view === "clientes" ? "mobile-home mobile-clients" : view === "planes" ? "mobile-home mobile-plans" : ""}`}>
-    {(view === "inicio" || view === "clientes" || view === "planes") && <><header className="mobile-home-topbar mobile-home-only"><div className="mobile-brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div><div className="mobile-header-actions"><button aria-label="Buscar clientes" onClick={()=>{go("clientes");requestAnimationFrame(()=>document.querySelector<HTMLInputElement>(".clients-page .search-box input")?.focus());}}><MobileIcon name="search"/></button><button aria-label="Ver actividad reciente" onClick={()=>go("asistencias")}><MobileIcon name="bell"/></button><button className="mobile-profile" aria-label="Abrir menú de administrador" onClick={()=>setSidebarOpen(true)}>MO</button></div></header><nav className="mobile-bottom-nav mobile-home-only" aria-label="Navegación móvil">{([{view:"inicio",label:"Inicio",icon:"home"},{view:"clientes",label:"Clientes",icon:"users"},{view:"planes",label:"Planes",icon:"plans"},{view:"cobros",label:"Cobros",icon:"money"}] as const).map((item)=><button key={item.view} aria-current={view===item.view ? "page" : undefined} onClick={()=>go(item.view)}><MobileIcon name={item.icon}/><span>{item.label}</span></button>)}<button onClick={()=>setSidebarOpen(true)}><MobileIcon name="more"/><span>Más</span></button></nav></>}
+  const moreIsActive = view === "fidelidad" || view === "asistencias" || view === "reportes";
+
+  return <main className={`app-shell ${view === "inicio" ? "mobile-home" : view === "clientes" ? "mobile-home mobile-clients" : view === "planes" ? "mobile-home mobile-plans" : view === "fidelidad" ? "mobile-home mobile-loyalty" : ""}`}>
+    <header className="mobile-home-topbar mobile-home-only"><div className="mobile-brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div><div className="mobile-header-actions"><button aria-label="Buscar clientes" onClick={()=>{go("clientes");requestAnimationFrame(()=>document.querySelector<HTMLInputElement>(".clients-page .search-box input")?.focus());}}><MobileIcon name="search"/></button><button aria-label="Ver actividad reciente" onClick={()=>go("asistencias")}><MobileIcon name="bell"/></button><button className="mobile-profile" aria-label="Abrir opciones" onClick={()=>setMobileMoreOpen(true)}>MO</button></div></header>
+    <nav className="mobile-bottom-nav mobile-home-only" aria-label="Navegación móvil">{([{view:"inicio",label:"Inicio",icon:"home"},{view:"clientes",label:"Clientes",icon:"users"},{view:"planes",label:"Planes",icon:"plans"},{view:"cobros",label:"Cobros",icon:"money"}] as const).map((item)=><button key={item.view} aria-current={view===item.view ? "page" : undefined} onClick={()=>go(item.view)}><MobileIcon name={item.icon}/><span>{item.label}</span></button>)}<button aria-current={moreIsActive ? "page" : undefined} onClick={()=>setMobileMoreOpen(true)}><MobileIcon name="more"/><span>Más</span></button></nav>
+    {mobileMoreOpen&&<div className="mobile-more-layer mobile-home-only" role="dialog" aria-modal="true" aria-label="Más opciones">
+      <button className="mobile-more-scrim" aria-label="Cerrar más opciones" onClick={()=>setMobileMoreOpen(false)}/>
+      <section className="mobile-more-sheet">
+        <div className="mobile-more-handle"/>
+        <header><div><small>MONSTER GYM OS</small><h2>Más opciones</h2></div><button aria-label="Cerrar" onClick={()=>setMobileMoreOpen(false)}>×</button></header>
+        <nav>
+          <button className={view==="fidelidad"?"active":""} onClick={()=>go("fidelidad")}><span><MobileIcon name="star"/></span><div><strong>Fidelidad</strong><small>Tarjetas, QR y sellos</small></div><b>›</b></button>
+          <button className={view==="asistencias"?"active":""} onClick={()=>go("asistencias")}><span><MobileIcon name="check"/></span><div><strong>Asistencias</strong><small>Historial y control de ingresos</small></div><b>›</b></button>
+          <button className={view==="reportes"?"active":""} onClick={()=>go("reportes")}><span><MobileIcon name="plans"/></span><div><strong>Reportes</strong><small>Indicadores del gimnasio</small></div><b>›</b></button>
+        </nav>
+        <button className="mobile-more-logout" onClick={()=>{setMobileMoreOpen(false);void logout();}}><span className="avatar avatar-small">MO</span><div><strong>Administrador</strong><small>Cerrar sesión</small></div><b>Salir</b></button>
+      </section>
+    </div>}
     <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
       <div className="brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div>
       <nav aria-label="Navegación principal">

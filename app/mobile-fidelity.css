@@ -1,0 +1,347 @@
+/* Fidelity mobile — isolated from desktop. */
+@media (max-width:760px) {
+  .mobile-loyalty {
+    --loyalty-border:#34485b;
+    --loyalty-muted:#acbad7;
+    min-height:100dvh;
+    background:
+      radial-gradient(ellipse at 100% 12%,#31502055,transparent 30%),
+      radial-gradient(ellipse at 0% 55%,#26205945,transparent 34%),
+      #0b121a;
+    color:#f6f8ff;
+  }
+
+  .mobile-loyalty .topbar { display:none; }
+  .mobile-loyalty .main-content { width:100%; margin:0; }
+  .mobile-loyalty .dashboard {
+    width:calc(100% - 24px);
+    margin:0 auto;
+    padding:6px 0 calc(94px + env(safe-area-inset-bottom));
+  }
+
+  /* mobile-home hides headings by default; Fidelity intentionally restores its own. */
+  .mobile-loyalty .dashboard>.view-heading {
+    display:flex;
+    margin:8px 2px 14px;
+    align-items:flex-start;
+  }
+  .mobile-loyalty .view-heading .view-kicker { display:none; }
+  .mobile-loyalty .view-heading h1 {
+    margin:0;
+    color:#f7f9ff;
+    font-size:clamp(1.9rem,8vw,2.5rem);
+    line-height:1.05;
+    letter-spacing:-.045em;
+    font-weight:790;
+  }
+  .mobile-loyalty .view-heading p {
+    margin:7px 0 0;
+    color:#aebdde;
+    font-size:.875rem;
+    line-height:1.35;
+  }
+
+  .mobile-loyalty .loyalty-toolbar {
+    min-height:0;
+    margin:0 0 10px;
+    padding:0;
+    border:0;
+    background:transparent;
+  }
+  .mobile-loyalty .loyalty-toolbar>span { display:none; }
+  .mobile-loyalty .search-box {
+    width:100%;
+    min-height:48px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:0 14px;
+    border:1px solid #3a4e61;
+    border-radius:13px;
+    background:linear-gradient(120deg,#162330,#101b26);
+    color:#afbfdf;
+    box-shadow:inset 0 1px 0 #ffffff08;
+  }
+  .mobile-loyalty .search-box svg { width:19px; height:19px; flex:0 0 auto; }
+  .mobile-loyalty .search-box input {
+    width:100%;
+    min-width:0;
+    border:0;
+    outline:0;
+    background:transparent;
+    color:#f5f7ff;
+    font-size:.9375rem;
+  }
+  .mobile-loyalty .search-box input::placeholder { color:#9daecc; }
+
+  .mobile-loyalty .loyalty-gallery {
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+  }
+
+  .mobile-loyalty .loyalty-gallery-card {
+    overflow:hidden;
+    border:1px solid #485477;
+    border-radius:15px;
+    background:
+      radial-gradient(circle at 88% 10%,#6f45df55,transparent 38%),
+      radial-gradient(circle at 8% 95%,#5a308e42,transparent 42%),
+      linear-gradient(120deg,#151b38,#151b2d 58%,#17233a);
+    box-shadow:0 10px 28px #05070c2e,inset 0 1px 0 #ffffff0a;
+    color:#f8f9ff;
+  }
+
+  .mobile-loyalty .loyalty-card-visual {
+    min-height:0;
+    margin:0;
+    padding:14px 14px 11px;
+    border-radius:0;
+    background:
+      radial-gradient(#ffffff0b 1px,transparent 1px);
+    background-size:10px 10px;
+    position:relative;
+  }
+
+  .mobile-loyalty .gallery-card-top {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:12px;
+  }
+  .mobile-loyalty .gallery-card-top .mini-brand { display:flex; align-items:center; gap:8px; }
+  .mobile-loyalty .gallery-card-top .mini-brand>b {
+    width:34px;
+    height:34px;
+    display:grid;
+    place-items:center;
+    border-radius:9px;
+    background:#c8f45a;
+    color:#11170a;
+    font-size:1rem;
+    font-weight:950;
+    transform:rotate(-6deg);
+  }
+  .mobile-loyalty .gallery-card-top .mini-brand>span {
+    color:#f4f6ff;
+    font-size:.75rem;
+    line-height:1.05;
+    font-weight:850;
+    letter-spacing:.035em;
+  }
+  .mobile-loyalty .gallery-card-top .mini-brand small {
+    color:#bbc5df;
+    font-size:.6875rem;
+    letter-spacing:.06em;
+  }
+
+  .mobile-loyalty .gallery-status {
+    min-height:30px;
+    display:flex;
+    align-items:center;
+    padding:5px 10px;
+    border:1px solid #85b64c;
+    border-radius:999px;
+    background:#1e39273d;
+    color:#c9f45a;
+    font-size:.75rem;
+    font-weight:850;
+  }
+  .mobile-loyalty .gallery-status.expired { border-color:#8d5252; color:#ff9d9d; background:#40242455; }
+
+  .mobile-loyalty .gallery-card-member {
+    min-height:72px;
+    display:flex;
+    align-items:center;
+    gap:11px;
+    width:calc(100% - 98px);
+    margin:0 0 12px;
+  }
+  .mobile-loyalty .gallery-card-member>img,
+  .mobile-loyalty .gallery-card-member>.avatar {
+    width:58px;
+    height:58px;
+    flex:0 0 58px;
+    border-radius:50%;
+    object-fit:cover;
+    border:2px solid #9f69ff;
+    background:#ded3ff;
+    color:#5030a3;
+    font-size:.9rem;
+  }
+  .mobile-loyalty .gallery-card-member>div { min-width:0; }
+  .mobile-loyalty .gallery-card-member small {
+    display:block;
+    color:#aebadd;
+    font-size:.6875rem;
+    letter-spacing:.09em;
+  }
+  .mobile-loyalty .gallery-card-member strong {
+    display:block;
+    margin-top:1px;
+    color:#fff;
+    font-size:1rem;
+    line-height:1.15;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .mobile-loyalty .gallery-card-member p {
+    margin:3px 0 0;
+    color:#c5cde2;
+    font-size:.8125rem;
+  }
+  .mobile-loyalty .gallery-card-member code {
+    display:block;
+    margin-top:2px;
+    color:#aab7d2;
+    font-size:.6875rem;
+    letter-spacing:.035em;
+  }
+
+  .mobile-loyalty .gallery-card-bottom {
+    display:block;
+    min-width:0;
+    padding-right:0;
+  }
+  .mobile-loyalty .gallery-loyalty { min-width:0; }
+  .mobile-loyalty .gallery-loyalty>div:first-child {
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:8px;
+    margin-bottom:7px;
+  }
+  .mobile-loyalty .gallery-loyalty small { color:#aebadd; font-size:.6875rem; }
+  .mobile-loyalty .gallery-loyalty strong { color:#f3f5ff; font-size:.8125rem; }
+
+  .mobile-loyalty .gallery-stamps {
+    display:grid;
+    grid-template-columns:repeat(10,minmax(0,1fr));
+    gap:4px;
+    width:calc(100% - 98px);
+  }
+  .mobile-loyalty .gallery-stamps i {
+    width:100%;
+    height:24px;
+    display:grid;
+    place-items:center;
+    border:1px solid #3a4163;
+    border-radius:6px;
+    background:#252a4b;
+    color:#162006;
+    font-size:0;
+    font-style:normal;
+  }
+  .mobile-loyalty .gallery-stamps i.filled {
+    border-color:#bdf350;
+    background:linear-gradient(145deg,#d7ff68,#aef13e);
+    box-shadow:0 0 14px #9bea3f28;
+  }
+
+  .mobile-loyalty .gallery-qr {
+    position:absolute;
+    top:69px;
+    right:14px;
+    width:82px;
+    height:82px;
+    padding:4px;
+    border:1px solid #d6d8df;
+    border-radius:10px;
+    background:#fff;
+    overflow:hidden;
+  }
+  .mobile-loyalty .gallery-qr img { width:100%; height:100%; display:block; object-fit:contain; }
+
+  .mobile-loyalty .gallery-card-info {
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:10px;
+    align-items:center;
+    padding:10px 14px 12px;
+    border-top:1px solid #3b4260;
+  }
+  .mobile-loyalty .gallery-card-info>div:first-child strong {
+    display:block;
+    color:#f4f6ff;
+    font-size:.875rem;
+  }
+  .mobile-loyalty .gallery-card-info>div:first-child span { display:none; }
+
+  .mobile-loyalty .gallery-card-actions {
+    display:flex;
+    align-items:center;
+    gap:7px;
+  }
+  .mobile-loyalty .gallery-card-actions button {
+    min-height:38px;
+    padding:8px 11px;
+    border:1px solid #566785;
+    border-radius:9px;
+    background:#172232;
+    color:#f0f3ff;
+    font-size:.75rem;
+    font-weight:760;
+    white-space:nowrap;
+  }
+  .mobile-loyalty .gallery-card-actions button:last-child {
+    min-width:84px;
+    border-color:#d2ff6d;
+    background:linear-gradient(135deg,#d6ff69,#b8ef4b);
+    color:#111708;
+  }
+  .mobile-loyalty .gallery-card-actions button:disabled {
+    border-color:#48505f;
+    background:#29313c;
+    color:#798494;
+    opacity:.72;
+  }
+
+  .mobile-loyalty-summary {
+    width:100%;
+    display:grid!important;
+    grid-template-columns:42px minmax(0,1fr) auto;
+    align-items:center;
+    gap:11px;
+    margin:10px 0 0;
+    padding:13px;
+    border:1px solid #395268;
+    border-radius:14px;
+    background:
+      radial-gradient(ellipse at 100% 100%,#75af2e44,transparent 47%),
+      linear-gradient(125deg,#17242e,#101a23);
+    color:#f3f6ff;
+  }
+  .mobile-loyalty-summary>span {
+    width:42px;
+    height:42px;
+    display:grid;
+    place-items:center;
+    border:1px solid #426338;
+    border-radius:12px;
+    background:#213b29;
+    color:#c9f45a;
+  }
+  .mobile-loyalty-summary strong,.mobile-loyalty-summary small { display:block; }
+  .mobile-loyalty-summary strong { font-size:.9375rem; }
+  .mobile-loyalty-summary small { margin-top:3px; color:#aebcda; font-size:.75rem; }
+  .mobile-loyalty-summary>b { color:#aebfe6; font-size:1.8rem; font-weight:300; }
+
+  .mobile-loyalty .big-empty {
+    border:1px solid #35495d;
+    background:#121c27;
+    color:#f5f7ff;
+  }
+  .mobile-loyalty .big-empty p { color:#aebcda; }
+}
+
+@media (max-width:370px) {
+  .mobile-loyalty .gallery-card-member { width:calc(100% - 88px); }
+  .mobile-loyalty .gallery-qr { width:74px; height:74px; }
+  .mobile-loyalty .gallery-stamps { width:100%; grid-template-columns:repeat(5,1fr); }
+  .mobile-loyalty .gallery-stamps i { height:22px; }
+  .mobile-loyalty .gallery-card-info { grid-template-columns:1fr; }
+  .mobile-loyalty .gallery-card-actions { width:100%; }
+  .mobile-loyalty .gallery-card-actions button { flex:1; }
+}

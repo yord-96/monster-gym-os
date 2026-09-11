@@ -649,7 +649,7 @@ export default function Home() {
     <section className="metrics-grid">
       <article className="metric-card"><div className="metric-icon purple">↙</div><div className="metric-top"><span>Visitas hoy</span><small>{todayVisits ? "Actualizado" : "Sin actividad"}</small></div><strong>{todayVisits}</strong><p>Ingresos confirmados</p></article>
       <article className="metric-card"><div className="metric-icon lime">♙</div><div className="metric-top"><span>Miembros habilitados</span><small>{clients.length} total</small></div><strong>{activeClients}</strong><p>{suspendedClients} suspendidos</p></article>
-      <article className="metric-card"><div className="metric-icon coral">$</div><div className="metric-top"><span>Saldo por cobrar</span><small>Actual</small></div><strong>{money(totalDebt)}</strong><p>Deuda acumulada en membresías vigentes</p></article>
+      <article className="metric-card"><div className="metric-icon coral">$</div><div className="metric-top"><span>Saldo por cobrar</span><small>Actual</small></div><strong>{money(totalDebt)}</strong><p>Deuda en membresías vigentes</p></article>
     </section>
     <div className="mobile-shortcuts mobile-home-only"><button onClick={()=>go("planes")}><span><MobileIcon name="plans"/></span><div><strong>Planes</strong><small>Gestiona membresías</small></div><b>›</b></button><button onClick={()=>go("fidelidad")}><span><MobileIcon name="star"/></span><div><strong>Fidelidad</strong><small>Premia a tus clientes</small></div><b>›</b></button></div>
     <section className="bottom-grid">

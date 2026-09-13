@@ -1,0 +1,74 @@
+/* Light dialogs own their text palette, independently of the surrounding page. */
+.modal-layer,
+.login-card {
+  color:#202735;
+  color-scheme:light;
+  --ink:#202735;
+  --muted:#596477;
+}
+.modal-layer :is(.client-modal,.scanner-modal,.card-modal,.simple-modal,.payment-modal,.delete-modal) {
+  color:#202735;
+  background-color:#fff;
+}
+.modal-layer :is(h2,h3),.login-card h1 { color:#202735; }
+.modal-layer :is(input:not([type=file]):not([type=checkbox]):not([type=radio]),select,textarea),
+.login-card input {
+  color:#202735;
+  -webkit-text-fill-color:#202735;
+  caret-color:#5432b0;
+  background-color:#fff;
+  border-color:#98a6ba;
+  opacity:1;
+  color-scheme:light;
+}
+.modal-layer :is(input,textarea)::placeholder,.login-card input::placeholder {
+  color:#637087;
+  -webkit-text-fill-color:#637087;
+  opacity:1;
+}
+.modal-layer :is(select option,select optgroup) { color:#202735; background:#fff; }
+.modal-layer input::-webkit-datetime-edit { color:#202735; -webkit-text-fill-color:#202735; }
+.modal-layer input::-webkit-calendar-picker-indicator { opacity:1; }
+.modal-layer input:-webkit-autofill,.login-card input:-webkit-autofill {
+  -webkit-text-fill-color:#202735;
+  caret-color:#202735;
+  box-shadow:0 0 0 1000px #edf3ff inset;
+}
+.modal-layer :is(input,select,textarea):disabled {
+  color:#596477;
+  -webkit-text-fill-color:#596477;
+  background:#edf0f5;
+  opacity:1;
+}
+.modal-layer :is(.field-grid label>span,.full-field>span,.compact-field>span,.simple-modal label>span,.payment-modal label>span) {
+  color:#364257;
+  font-weight:650;
+}
+.modal-layer .modal-kicker { color:#6440ca; }
+.modal-layer :is(.close-button,.download-button,.form-actions button[type=button],.delete-modal button:not(.delete-confirm),.payment-methods button:not(.selected)) {
+  color:#303b50;
+  background:#fff;
+  border-color:#abb5c5;
+}
+.modal-layer :is(.form-actions button[type=submit],.form-actions button:not([type]),.confirm-visit) { color:#fff; background:#202735; }
+.modal-layer .text-action { color:#5e37bc; }
+.modal-layer .photo-input:not(.has-photo) { color:#303b50; background:#f6f7fb; border-color:#9eabc0; }
+.modal-layer .photo-input:not(.has-photo) small { color:#596477; }
+.modal-layer .photo-input.has-photo { color:#fff; }
+.modal-layer .photo-input.has-photo small { color:#e5eaf3; }
+.modal-layer :is(.voucher-capture:not(.has-voucher),.switch-field) { color:#303b50; }
+.modal-layer :is(.voucher-capture small,.switch-field small,.photo-input:not(.has-photo) small,.card-help,.privacy-note) { color:#596477; }
+.modal-layer :is(.form-error,.scan-error) { color:#ac2929; }
+.modal-layer .digital-card { color:#fff; }
+@media(max-width:760px) {
+  .modal-layer :is(input:not([type=file]):not([type=checkbox]):not([type=radio]),select,textarea),.login-card input {
+    font-size:1rem;
+    line-height:1.4;
+    min-height:46px;
+  }
+  .modal-layer :is(.client-modal,.scanner-modal,.card-modal,.simple-modal,.payment-modal,.delete-modal) { font-size:1rem; }
+  .modal-layer :is(.field-grid label>span,.full-field>span,.simple-modal label>span,.payment-modal label>span) { font-size:.875rem; }
+  .modal-layer :is(.client-modal,.simple-modal,.payment-modal)>header p { color:#596477; font-size:.875rem; line-height:1.45; }
+  .modal-layer :is(.photo-input strong,.voucher-capture strong,.form-actions button,.download-button,.text-action) { font-size:.875rem; }
+  .modal-layer :is(input,select,textarea,button):focus-visible { outline:3px solid #7454c9; outline-offset:2px; }
+}

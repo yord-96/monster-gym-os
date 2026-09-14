@@ -9,6 +9,7 @@ import "./mobile-fidelity.css";
 import "./mobile-navigation.css";
 import "./form-contrast.css";
 import "./commerce.css";
+import "./attendance.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

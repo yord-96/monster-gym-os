@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import QRCode from "qrcode";
+import { AttendanceView } from "./attendance";
 import { BillingView, StoreView, DailyReports, VoucherPicker } from "./commerce";
 
 type View = "inicio" | "clientes" | "planes" | "fidelidad" | "asistencias" | "cobros" | "reportes" | "tienda";
@@ -726,7 +727,7 @@ export default function Home() {
     </> : <div className="big-empty"><span>✦</span><h2>Sin tarjetas</h2></div>}
   </section>;
 
-  const attendanceView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">OPERACIÓN</span><h1>Asistencias</h1><p>El ingreso se bloquea automáticamente si el plan venció, agotó sesiones o superó los 14 días de tolerancia con deuda.</p></div><button className="primary-button page-action" onClick={openScanner}>⌗ Escanear QR</button></div>{activities.length ? <div className="history-list">{activities.map((item)=><article key={item.id}><span className={`history-icon ${item.type}`}>{item.type==="registro"?"＋":item.type==="premio"?"✦":"✓"}</span><div><strong>{item.clientName}</strong><p>{item.description}</p></div><time>{formatDateTime(item.createdAt)}</time></article>)}</div> : <div className="big-empty"><span>✓</span><h2>Aún no hay movimientos</h2></div>}</section>;
+  const attendanceView = <AttendanceView activities={activities} clients={clients} onScan={openScanner} onVisit={id=>{const client=clients.find(c=>c.id===id);if(client){scanHandledRef.current=false;visitSubmittingRef.current=false;setScannedClient(client);setScanStep(client.accessStatus==="active"?"found":"blocked");setScannerOpen(true);}}} onCard={id=>{const client=clients.find(c=>c.id===id);if(client)void showCard(client);}} onPay={id=>{const client=clients.find(c=>c.id===id);if(client)void openPayment(client);}} onEdit={id=>{const client=clients.find(c=>c.id===id);if(client)openEditClient(client);}}/>;
 
   const cobrosView = <BillingView clients={clients} qrUrl={settings.paymentQrUrl} onPay={id=>{const client=clients.find(c=>c.id===id);if(client)void openPayment(client);}} onRenew={id=>{const client=clients.find(c=>c.id===id);if(client)openRenew(client);}} onQrFile={handlePaymentQr} qrSaving={qrSaving} qrError={qrError}/>;
   const reportsView = <DailyReports/>;
@@ -734,17 +735,18 @@ export default function Home() {
 
   const content: Record<View, React.ReactNode> = { inicio: dashboardView, clientes: clientsView, planes: plansView, fidelidad: loyaltyView, asistencias: attendanceView, cobros: cobrosView, reportes: reportsView, tienda: storeView };
 
-  const moreIsActive = view === "fidelidad" || view === "asistencias" || view === "reportes" || view === "tienda";
+  const moreIsActive = view === "fidelidad" || view === "planes" || view === "reportes" || view === "tienda";
 
-  return <main className={`app-shell ${view === "inicio" ? "mobile-home" : view === "clientes" ? "mobile-home mobile-clients" : view === "planes" ? "mobile-home mobile-plans" : view === "fidelidad" ? "mobile-home mobile-loyalty" : ["cobros","reportes","tienda"].includes(view) ? "mobile-home mobile-commerce" : ""}`}>
+  return <main className={`app-shell ${view === "inicio" ? "mobile-home" : view === "clientes" ? "mobile-home mobile-clients" : view === "planes" ? "mobile-home mobile-plans" : view === "fidelidad" ? "mobile-home mobile-loyalty" : view === "asistencias" ? "mobile-home mobile-attendance" : ["cobros","reportes","tienda"].includes(view) ? "mobile-home mobile-commerce" : ""}`}>
     <header className="mobile-home-topbar mobile-home-only"><div className="mobile-brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div><div className="mobile-header-actions"><button aria-label="Buscar clientes" onClick={()=>{go("clientes");requestAnimationFrame(()=>document.querySelector<HTMLInputElement>(".clients-page .search-box input")?.focus());}}><MobileIcon name="search"/></button><button aria-label="Ver actividad reciente" onClick={()=>go("asistencias")}><MobileIcon name="bell"/></button><button className="mobile-profile" aria-label="Abrir opciones" onClick={()=>setMobileMoreOpen(true)}>MO</button></div></header>
-    <nav className="mobile-bottom-nav mobile-home-only" aria-label="Navegación móvil">{([{view:"inicio",label:"Inicio",icon:"home"},{view:"clientes",label:"Clientes",icon:"users"},{view:"planes",label:"Planes",icon:"plans"},{view:"cobros",label:"Cobros",icon:"money"}] as const).map((item)=><button key={item.view} aria-current={view===item.view ? "page" : undefined} onClick={()=>go(item.view)}><MobileIcon name={item.icon}/><span>{item.label}</span></button>)}<button aria-current={moreIsActive ? "page" : undefined} onClick={()=>setMobileMoreOpen(true)}><MobileIcon name="more"/><span>Más</span></button></nav>
+    <nav className="mobile-bottom-nav mobile-home-only" aria-label="Navegación móvil">{([{view:"inicio",label:"Inicio",icon:"home"},{view:"clientes",label:"Clientes",icon:"users"},{view:"asistencias",label:"Asistencias",icon:"check"},{view:"cobros",label:"Cobros",icon:"money"}] as const).map((item)=><button key={item.view} aria-current={view===item.view ? "page" : undefined} onClick={()=>go(item.view)}><MobileIcon name={item.icon}/><span>{item.label}</span></button>)}<button aria-current={moreIsActive ? "page" : undefined} onClick={()=>setMobileMoreOpen(true)}><MobileIcon name="more"/><span>Más</span></button></nav>
     {mobileMoreOpen&&<div className="mobile-more-layer mobile-home-only" role="dialog" aria-modal="true" aria-label="Más opciones">
       <button className="mobile-more-scrim" aria-label="Cerrar más opciones" onClick={()=>setMobileMoreOpen(false)}/>
       <section className="mobile-more-sheet">
         <div className="mobile-more-handle"/>
         <header><div><small>MONSTER GYM OS</small><h2>Más opciones</h2></div><button aria-label="Cerrar" onClick={()=>setMobileMoreOpen(false)}>×</button></header>
         <nav>
+          <button className={view==="planes"?"active":""} onClick={()=>go("planes")}><span><MobileIcon name="plans"/></span><div><strong>Planes</strong><small>Membresías y precios</small></div><b>›</b></button>
           <button className={view==="fidelidad"?"active":""} onClick={()=>go("fidelidad")}><span><MobileIcon name="star"/></span><div><strong>Fidelidad</strong><small>Tarjetas, QR y sellos</small></div><b>›</b></button>
           <button className={view==="asistencias"?"active":""} onClick={()=>go("asistencias")}><span><MobileIcon name="check"/></span><div><strong>Asistencias</strong><small>Historial y control de ingresos</small></div><b>›</b></button>
           <button className={view==="reportes"?"active":""} onClick={()=>go("reportes")}><span><MobileIcon name="plans"/></span><div><strong>Reportes</strong><small>Ingresos diarios y vouchers</small></div><b>›</b></button>

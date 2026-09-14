@@ -27,6 +27,7 @@ test("renderiza la aplicación Monster Gym", async () => {
 
 test("incluye base central, CRUD, planes, deuda, QR de cobro y vouchers", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const commerce = await readFile(new URL("../app/commerce.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   const database = await readFile(new URL("../server/database.mjs", import.meta.url), "utf8");
@@ -38,7 +39,7 @@ test("incluye base central, CRUD, planes, deuda, QR de cobro y vouchers", async 
   assert.match(page, /\/payments/);
   assert.match(page, /\/renew/);
   assert.match(page, /paymentQrUrl/);
-  assert.match(page, /capture="environment"/);
+  assert.match(commerce, /capture="environment"/);
   assert.match(page, /SUSPENDIDO POR DEUDA/);
   assert.match(page, /SESIONES AGOTADAS/);
   assert.match(page, /https:\/\/wa\.me/);

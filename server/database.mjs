@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
+import { initCommerce } from "./commerce.mjs";
 
 const DEFAULT_PLAN_IDS = {
   monthly: "plan-monthly",
@@ -201,9 +202,12 @@ export function openGymDatabase(path = process.env.MONSTER_DB_PATH || resolve("d
   `);
 
   ensureColumn(db, "clients", "manual_suspended", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "payments", "request_key", "TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS payments_request_idx ON payments(request_key) WHERE request_key IS NOT NULL;");
 
   seedPlans(db);
   migrateLegacyClients(db);
+  initCommerce(db);
   return db;
 }
 
@@ -418,6 +422,8 @@ export function updateClient(db, id, input) {
 export function renewMembership(db, clientId, input) {
   const client = db.prepare("SELECT * FROM clients WHERE id=?").get(clientId);
   if (!client) return null;
+  const current = currentMembershipRow(db,clientId);
+  if (current && paidCentsForMembership(db,current.id) < current.price_cents) throw new Error("Cobra el saldo pendiente antes de renovar el plan.");
   const membership = membershipFromPlan(db, clientId, String(input.planId || DEFAULT_PLAN_IDS.monthly), input.startsAt || nowIso());
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -438,21 +444,33 @@ export function getPayments(db, clientId) {
   return db.prepare("SELECT * FROM payments WHERE client_id=? ORDER BY created_at DESC").all(clientId).map(paymentFromRow);
 }
 
-export function registerPayment(db, clientId, input) {
+function insertPayment(db, clientId, input) {
+  const requestKey = input.requestKey ? String(input.requestKey) : null;
+  if (requestKey) {
+    if (!/^[a-zA-Z0-9-]{16,100}$/.test(requestKey)) throw new Error("Identificador de pago inválido.");
+    const previous = db.prepare("SELECT * FROM payments WHERE request_key=?").get(requestKey);
+    if (previous) {
+      if (previous.client_id !== clientId) throw new Error("El identificador pertenece a otro cliente.");
+      return { payment:paymentFromRow(previous),client:getClientById(db,clientId) };
+    }
+  }
   const client = db.prepare("SELECT * FROM clients WHERE id=?").get(clientId);
   if (!client) return null;
   const membership = currentMembershipRow(db, clientId);
   if (!membership) throw new Error("El cliente no tiene una membresía activa.");
+  if (input.membershipId && input.membershipId !== membership.id) throw new Error("La membresía cambió. Vuelve a abrir el cobro.");
 
   const amount = Number(input.amount || 0);
   if (!Number.isFinite(amount) || amount <= 0) throw new Error("Ingresa un monto válido.");
   const currentPaid = paidCentsForMembership(db, membership.id);
   const balance = Math.max(0, Number(membership.price_cents || 0) - currentPaid);
   const amountCents = money(amount);
+  if (amountCents < 1 || Math.abs(amount*100-amountCents)>0.00001) throw new Error("Usa un monto positivo con un máximo de dos decimales.");
   if (balance <= 0) throw new Error("Esta membresía ya está pagada completamente.");
   if (amountCents > balance) throw new Error(`El monto supera el saldo pendiente de Bs ${fromCents(balance).toFixed(2)}.`);
 
-  const method = input.method === "cash" ? "cash" : "qr";
+  if (!["cash","qr"].includes(input.method)) throw new Error("Método de pago inválido.");
+  const method = input.method;
   const voucherPath = String(input.voucherPath || "");
   if (method === "qr" && !voucherPath) throw new Error("Adjunta la foto del voucher para registrar un pago por QR.");
 
@@ -467,11 +485,17 @@ export function registerPayment(db, clientId, input) {
     createdAt: nowIso(),
   };
   db.prepare(`
-    INSERT INTO payments(id,client_id,membership_id,amount_cents,method,voucher_path,note,created_at)
-    VALUES (?,?,?,?,?,?,?,?)
-  `).run(payment.id, payment.clientId, payment.membershipId, payment.amountCents, payment.method, payment.voucherPath, payment.note, payment.createdAt);
+    INSERT INTO payments(id,client_id,membership_id,amount_cents,method,voucher_path,note,created_at,request_key)
+    VALUES (?,?,?,?,?,?,?,?,?)
+  `).run(payment.id, payment.clientId, payment.membershipId, payment.amountCents, payment.method, payment.voucherPath, payment.note, payment.createdAt,requestKey);
 
   return { payment: paymentFromRow(db.prepare("SELECT * FROM payments WHERE id=?").get(payment.id)), client: getClientById(db, clientId) };
+}
+
+export function registerPayment(db, clientId, input) {
+  db.exec("BEGIN IMMEDIATE");
+  try { const result=insertPayment(db,clientId,input); db.exec("COMMIT"); return result; }
+  catch(error) { db.exec("ROLLBACK"); throw error; }
 }
 
 export function registerVisit(db, id) {

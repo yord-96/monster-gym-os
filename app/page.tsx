@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import QRCode from "qrcode";
+import { BillingView, StoreView, DailyReports, VoucherPicker } from "./commerce";
 
-type View = "inicio" | "clientes" | "planes" | "fidelidad" | "asistencias" | "cobros" | "reportes";
+type View = "inicio" | "clientes" | "planes" | "fidelidad" | "asistencias" | "cobros" | "reportes" | "tienda";
 type ScanStep = "camera" | "found" | "success" | "missing" | "blocked";
 type PaymentMethod = "cash" | "qr";
 type AccessStatus = "active" | "expired" | "debt_suspended" | "manual_suspended" | "sessions_exhausted";
@@ -268,6 +269,8 @@ export default function Home() {
   const [scannedClient, setScannedClient] = useState<ClientRecord | null>(null);
   const [scanError, setScanError] = useState("");
   const [manualCode, setManualCode] = useState("");
+  const paymentRequestKey = useRef("");
+  const paymentSubmitting = useRef(false);
   const scannerRef = useRef<{ stop: () => Promise<void>; clear: () => void | Promise<void> } | null>(null);
   const checkInHandledRef = useRef(false);
   const scanHandledRef = useRef(false);
@@ -326,7 +329,7 @@ export default function Home() {
   useEffect(() => {
     const updateView = () => {
       const next = location.hash.replace("#", "") as View;
-      setView(["inicio", "clientes", "planes", "fidelidad", "asistencias", "cobros", "reportes"].includes(next) ? next : "inicio");
+      setView(["inicio", "clientes", "planes", "fidelidad", "asistencias", "cobros", "reportes", "tienda"].includes(next) ? next : "inicio");
     };
     updateView();
     addEventListener("hashchange", updateView);
@@ -509,6 +512,7 @@ export default function Home() {
   };
 
   const openPayment = async (client: ClientRecord) => {
+    paymentRequestKey.current = crypto.randomUUID();
     setPaymentClient(client);
     setPaymentForm({ amount: client.balance > 0 ? String(client.balance) : "", method: "qr", note: "" });
     setVoucherImage(""); setPaymentError(""); setPayments([]);
@@ -518,29 +522,24 @@ export default function Home() {
     } catch (error) { setPaymentError(error instanceof Error ? error.message : "No se pudo cargar el historial."); }
   };
 
-  const handleVoucher = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    try { setVoucherImage(await imageFileToDataUrl(file, 1800, 0.88, false)); setPaymentError(""); }
-    catch (error) { setPaymentError(error instanceof Error ? error.message : "No se pudo procesar el voucher."); }
-  };
-
   const registerPaymentRecord = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!paymentClient) return;
+    if (!paymentClient || paymentSubmitting.current) return;
+    paymentSubmitting.current = true;
     setPaymentBusy(true); setPaymentError("");
     try {
       const result = await apiJson<{ client: ClientRecord; payment: PaymentRecord }>(`/api/clients/${encodeURIComponent(paymentClient.id)}/payments`, {
         method: "POST",
-        body: JSON.stringify({ amount: Number(paymentForm.amount), method: paymentForm.method, note: paymentForm.note, voucherImage: paymentForm.method === "qr" ? voucherImage : "" }),
+        body: JSON.stringify({ requestKey:paymentRequestKey.current,membershipId:paymentClient.membershipId,amount: Number(paymentForm.amount), method: paymentForm.method, note: paymentForm.note, voucherImage }),
       });
       replaceClient(result.client);
       setPayments((current) => [result.payment, ...current]);
+      paymentRequestKey.current = crypto.randomUUID();
       setPaymentClient(result.client);
       setPaymentForm({ amount: result.client.balance > 0 ? String(result.client.balance) : "", method: "qr", note: "" });
       setVoucherImage("");
     } catch (error) { setPaymentError(error instanceof Error ? error.message : "No se pudo registrar el pago."); }
-    finally { setPaymentBusy(false); }
+    finally { setPaymentBusy(false); paymentSubmitting.current=false; }
   };
 
   const openNewPlan = () => {
@@ -626,7 +625,7 @@ export default function Home() {
   const totalDebt = clients.reduce((sum, item) => sum + item.balance, 0);
   const filteredClients = useMemo(() => clients.filter((item) => `${item.name} ${item.phone} ${item.plan}`.toLowerCase().includes(search.toLowerCase())), [clients, search]);
   const clientFilters = [
-    { id:"all", label:"Todos", matches: (_item: ClientRecord) => true },
+    { id:"all", label:"Todos", matches: () => true },
     { id:"active", label:"Activos", matches: (item: ClientRecord) => item.accessStatus === "active" },
     { id:"suspended", label:"Suspendidos", matches: (item: ClientRecord) => ["manual_suspended", "debt_suspended"].includes(item.accessStatus) },
     { id:"expired", label:"Vencidos", matches: (item: ClientRecord) => item.accessStatus === "expired" },
@@ -729,21 +728,15 @@ export default function Home() {
 
   const attendanceView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">OPERACIÓN</span><h1>Asistencias</h1><p>El ingreso se bloquea automáticamente si el plan venció, agotó sesiones o superó los 14 días de tolerancia con deuda.</p></div><button className="primary-button page-action" onClick={openScanner}>⌗ Escanear QR</button></div>{activities.length ? <div className="history-list">{activities.map((item)=><article key={item.id}><span className={`history-icon ${item.type}`}>{item.type==="registro"?"＋":item.type==="premio"?"✦":"✓"}</span><div><strong>{item.clientName}</strong><p>{item.description}</p></div><time>{formatDateTime(item.createdAt)}</time></article>)}</div> : <div className="big-empty"><span>✓</span><h2>Aún no hay movimientos</h2></div>}</section>;
 
-  const cobrosView = <section className="view-page">
-    <div className="view-heading"><div><span className="view-kicker">CAJA Y RESPALDOS</span><h1>Cobros</h1><p>QR oficial del gimnasio, saldos y vouchers guardados en el servidor.</p></div></div>
-    <div className="billing-grid">
-      <article className="panel payment-qr-settings"><div className="panel-head"><div><h3>QR de cobro del gimnasio</h3><p>Esta imagen se mostrará al registrar un pago por QR.</p></div></div>{settings.paymentQrUrl ? <img src={settings.paymentQrUrl} alt="QR de cobro del gimnasio"/> : <div className="qr-empty">Aún no cargaste el QR de cobro</div>}<label className="upload-button">{qrSaving ? "Guardando…" : settings.paymentQrUrl ? "Reemplazar QR" : "Cargar QR"}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={handlePaymentQr} disabled={qrSaving}/></label>{qrError&&<p className="form-error">{qrError}</p>}</article>
-      <article className="panel debt-list"><div className="panel-head"><div><h3>Saldos pendientes</h3><p>Clientes con pago incompleto</p></div></div>{clients.filter((item)=>item.balance>0).length ? clients.filter((item)=>item.balance>0).sort((a,b)=>b.balance-a.balance).map((item)=><button className="debt-row" key={item.id} onClick={()=>openPayment(item)}><span><strong>{item.name}</strong><small>{item.plan} · tolerancia hasta {formatDate(item.graceUntil)}</small></span><b>{money(item.balance)}</b></button>) : <div className="big-empty compact"><span>✓</span><h2>Sin saldos pendientes</h2></div>}</article>
-    </div>
-  </section>;
+  const cobrosView = <BillingView clients={clients} qrUrl={settings.paymentQrUrl} onPay={id=>{const client=clients.find(c=>c.id===id);if(client)void openPayment(client);}} onRenew={id=>{const client=clients.find(c=>c.id===id);if(client)openRenew(client);}} onQrFile={handlePaymentQr} qrSaving={qrSaving} qrError={qrError}/>;
+  const reportsView = <DailyReports/>;
+  const storeView = <StoreView/>;
 
-  const reportsView = <section className="view-page"><div className="view-heading"><div><span className="view-kicker">RESUMEN CENTRAL</span><h1>Reportes</h1><p>Indicadores de membresías, accesos y pagos.</p></div></div><div className="report-grid"><article><span>Clientes</span><strong>{clients.length}</strong><p>{activeClients} habilitados</p></article><article><span>Visitas</span><strong>{clients.reduce((sum,item)=>sum+item.visits,0)}</strong><p>{todayVisits} hoy</p></article><article><span>Por cobrar</span><strong>{money(totalDebt)}</strong><p>{suspendedClients} suspendidos</p></article></div></section>;
+  const content: Record<View, React.ReactNode> = { inicio: dashboardView, clientes: clientsView, planes: plansView, fidelidad: loyaltyView, asistencias: attendanceView, cobros: cobrosView, reportes: reportsView, tienda: storeView };
 
-  const content: Record<View, React.ReactNode> = { inicio: dashboardView, clientes: clientsView, planes: plansView, fidelidad: loyaltyView, asistencias: attendanceView, cobros: cobrosView, reportes: reportsView };
+  const moreIsActive = view === "fidelidad" || view === "asistencias" || view === "reportes" || view === "tienda";
 
-  const moreIsActive = view === "fidelidad" || view === "asistencias" || view === "reportes";
-
-  return <main className={`app-shell ${view === "inicio" ? "mobile-home" : view === "clientes" ? "mobile-home mobile-clients" : view === "planes" ? "mobile-home mobile-plans" : view === "fidelidad" ? "mobile-home mobile-loyalty" : ""}`}>
+  return <main className={`app-shell ${view === "inicio" ? "mobile-home" : view === "clientes" ? "mobile-home mobile-clients" : view === "planes" ? "mobile-home mobile-plans" : view === "fidelidad" ? "mobile-home mobile-loyalty" : ["cobros","reportes","tienda"].includes(view) ? "mobile-home mobile-commerce" : ""}`}>
     <header className="mobile-home-topbar mobile-home-only"><div className="mobile-brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div><div className="mobile-header-actions"><button aria-label="Buscar clientes" onClick={()=>{go("clientes");requestAnimationFrame(()=>document.querySelector<HTMLInputElement>(".clients-page .search-box input")?.focus());}}><MobileIcon name="search"/></button><button aria-label="Ver actividad reciente" onClick={()=>go("asistencias")}><MobileIcon name="bell"/></button><button className="mobile-profile" aria-label="Abrir opciones" onClick={()=>setMobileMoreOpen(true)}>MO</button></div></header>
     <nav className="mobile-bottom-nav mobile-home-only" aria-label="Navegación móvil">{([{view:"inicio",label:"Inicio",icon:"home"},{view:"clientes",label:"Clientes",icon:"users"},{view:"planes",label:"Planes",icon:"plans"},{view:"cobros",label:"Cobros",icon:"money"}] as const).map((item)=><button key={item.view} aria-current={view===item.view ? "page" : undefined} onClick={()=>go(item.view)}><MobileIcon name={item.icon}/><span>{item.label}</span></button>)}<button aria-current={moreIsActive ? "page" : undefined} onClick={()=>setMobileMoreOpen(true)}><MobileIcon name="more"/><span>Más</span></button></nav>
     {mobileMoreOpen&&<div className="mobile-more-layer mobile-home-only" role="dialog" aria-modal="true" aria-label="Más opciones">
@@ -754,7 +747,8 @@ export default function Home() {
         <nav>
           <button className={view==="fidelidad"?"active":""} onClick={()=>go("fidelidad")}><span><MobileIcon name="star"/></span><div><strong>Fidelidad</strong><small>Tarjetas, QR y sellos</small></div><b>›</b></button>
           <button className={view==="asistencias"?"active":""} onClick={()=>go("asistencias")}><span><MobileIcon name="check"/></span><div><strong>Asistencias</strong><small>Historial y control de ingresos</small></div><b>›</b></button>
-          <button className={view==="reportes"?"active":""} onClick={()=>go("reportes")}><span><MobileIcon name="plans"/></span><div><strong>Reportes</strong><small>Indicadores del gimnasio</small></div><b>›</b></button>
+          <button className={view==="reportes"?"active":""} onClick={()=>go("reportes")}><span><MobileIcon name="plans"/></span><div><strong>Reportes</strong><small>Ingresos diarios y vouchers</small></div><b>›</b></button>
+          <button className={view==="tienda"?"active":""} onClick={()=>go("tienda")}><span><MobileIcon name="plans"/></span><div><strong>Tienda</strong><small>Artículos y precios</small></div><b>›</b></button>
         </nav>
         <button className="mobile-more-logout" onClick={()=>{setMobileMoreOpen(false);void logout();}}><span className="avatar avatar-small">MO</span><div><strong>Administrador</strong><small>Cerrar sesión</small></div><b>Salir</b></button>
       </section>
@@ -771,6 +765,7 @@ export default function Home() {
         <button className={`nav-item ${view==="asistencias"?"active":""}`} onClick={()=>go("asistencias")}><span className="nav-icon">✓</span> Asistencias</button>
         <button className={`nav-item ${view==="cobros"?"active":""}`} onClick={()=>go("cobros")}><span className="nav-icon">$</span> Cobros</button>
         <button className={`nav-item ${view==="reportes"?"active":""}`} onClick={()=>go("reportes")}><span className="nav-icon">↗</span> Reportes</button>
+        <button className={`nav-item ${view==="tienda"?"active":""}`} onClick={()=>go("tienda")}><span className="nav-icon">◇</span> Tienda</button>
       </nav>
       <div className="sidebar-footer"><div className="storage-mini"><span className="status-dot"/><div><strong>BASE CENTRAL</strong><small>SQLite · respaldos de pago</small></div></div><button className="profile-button" onClick={logout}><span className="avatar avatar-small">MO</span><span><strong>Administrador</strong><small>Cerrar sesión</small></span></button></div>
     </aside>
@@ -792,7 +787,8 @@ export default function Home() {
       <div className="payment-summary"><div><span>Plan</span><strong>{money(paymentClient.membershipPrice)}</strong></div><div><span>Pagado</span><strong>{money(paymentClient.paidAmount)}</strong></div><div className="balance"><span>Saldo</span><strong>{money(paymentClient.balance)}</strong></div></div>
       {paymentClient.balance>0?<form onSubmit={registerPaymentRecord}>
         <div className="payment-methods"><button type="button" className={paymentForm.method==="qr"?"selected":""} onClick={()=>setPaymentForm({...paymentForm,method:"qr"})}>▦ QR</button><button type="button" className={paymentForm.method==="cash"?"selected":""} onClick={()=>setPaymentForm({...paymentForm,method:"cash"})}>Bs Efectivo</button></div>
-        {paymentForm.method==="qr"&&<div className="payment-qr-flow">{settings.paymentQrUrl?<img className="owner-qr" src={settings.paymentQrUrl} alt="QR de cobro"/>:<div className="qr-empty">Primero carga el QR del gimnasio en Cobros.</div>}<label className={`voucher-capture ${voucherImage?"has-voucher":""}`}>{voucherImage?<img src={voucherImage} alt="Voucher capturado"/>:<><span>📷</span><strong>Tomar foto del voucher</strong><small>También puedes elegir una imagen de la galería</small></>}<input type="file" accept="image/*" capture="environment" onChange={handleVoucher}/></label></div>}
+        {paymentForm.method==="qr"&&<div className="payment-qr-flow">{settings.paymentQrUrl?<img className="owner-qr" src={settings.paymentQrUrl} alt="QR de cobro"/>:<div className="qr-empty">Primero carga el QR del gimnasio en Cobros.</div>}<VoucherPicker value={voucherImage} onChange={setVoucherImage} disabled={paymentBusy}/></div>}
+        {paymentForm.method==="cash"&&<VoucherPicker value={voucherImage} onChange={setVoucherImage} disabled={paymentBusy}/>}
         <div className="field-grid"><label><span>Monto</span><input type="number" min="0.01" step="0.01" max={paymentClient.balance} value={paymentForm.amount} onChange={(e)=>setPaymentForm({...paymentForm,amount:e.target.value})}/></label><label><span>Nota opcional</span><input value={paymentForm.note} onChange={(e)=>setPaymentForm({...paymentForm,note:e.target.value})}/></label></div>
         {paymentError&&<p className="form-error">{paymentError}</p>}<button className="confirm-visit" disabled={paymentBusy||paymentForm.method==="qr"&&!voucherImage}>{paymentBusy?"Registrando…":"Registrar pago"}</button>
       </form>:<div className="paid-state">✓ Membresía pagada completamente</div>}
@@ -801,7 +797,7 @@ export default function Home() {
 
     {planOpen&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setPlanOpen(false)}/><section className="simple-modal"><header><div><span className="modal-kicker">{editingPlan?"EDITAR PLAN":"NUEVO PLAN"}</span><h2>{editingPlan?editingPlan.name:"Crear plan"}</h2><p>Esto permite agregar el cuarto plan cuando el dueño lo defina.</p></div><button className="close-button" onClick={()=>setPlanOpen(false)}>×</button></header><form onSubmit={savePlan}><label><span>Nombre</span><input required value={planForm.name} onChange={(e)=>setPlanForm({...planForm,name:e.target.value})}/></label><div className="field-grid"><label><span>Precio Bs</span><input type="number" min="0" step="0.01" value={planForm.price} onChange={(e)=>setPlanForm({...planForm,price:e.target.value})}/></label><label><span>Duración en meses</span><input type="number" min="1" value={planForm.durationMonths} onChange={(e)=>setPlanForm({...planForm,durationMonths:e.target.value})}/></label></div><label><span>Tipo</span><select value={planForm.billingType} onChange={(e)=>setPlanForm({...planForm,billingType:e.target.value as "unlimited"|"sessions"})}><option value="unlimited">Ingresos ilimitados</option><option value="sessions">Cantidad limitada de sesiones</option></select></label>{planForm.billingType==="sessions"&&<label><span>Sesiones por período</span><input type="number" min="1" value={planForm.sessionLimit} onChange={(e)=>setPlanForm({...planForm,sessionLimit:e.target.value})}/></label>}<div className="switch-field"><input aria-label="Plan disponible" type="checkbox" checked={planForm.active} onChange={(e)=>setPlanForm({...planForm,active:e.target.checked})}/><span><strong>Plan disponible</strong><small>Los planes desactivados conservan el historial.</small></span></div>{planError&&<p className="form-error">{planError}</p>}<div className="form-actions"><button type="button" onClick={()=>setPlanOpen(false)}>Cancelar</button><button disabled={planBusy}>{planBusy?"Guardando…":"Guardar plan"}</button></div></form></section></div>}
 
-    {deletingClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setDeletingClient(null)}/><section className="delete-modal"><div className="delete-symbol">!</div><span className="modal-kicker">ELIMINAR CLIENTE</span><h2>¿Eliminar a {deletingClient.name}?</h2><p>Se eliminarán membresías, pagos y referencias a vouchers. Esta acción no se puede deshacer.</p><div><button onClick={()=>setDeletingClient(null)}>Cancelar</button><button className="delete-confirm" onClick={deleteClientRecord}>Eliminar definitivamente</button></div></section></div>}
+    {deletingClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setDeletingClient(null)}/><section className="delete-modal"><div className="delete-symbol">!</div><span className="modal-kicker">ELIMINAR CLIENTE</span><h2>¿Eliminar a {deletingClient.name}?</h2><p>Se elimina el cliente y sus membresías. Los cobros y vouchers se conservan en Reportes. Esta acción no se puede deshacer.</p><div><button onClick={()=>setDeletingClient(null)}>Cancelar</button><button className="delete-confirm" onClick={deleteClientRecord}>Eliminar definitivamente</button></div></section></div>}
 
     {cardOpen&&cardClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setCardOpen(false)}/><section className="card-modal"><header><div><span className="modal-kicker">TARJETA DIGITAL</span><h2>{cardClient.name}</h2></div><button className="close-button" onClick={()=>setCardOpen(false)}>×</button></header><div className="digital-card" ref={cardRef}><div className="card-top"><div className="mini-brand"><b>M</b><span>MONSTER<br/><small>GYM OS</small></span></div><span className="card-tier">{accessLabel(cardClient)}</span></div><div className="card-person"><ClientAvatar client={cardClient} className="card-photo"/><div><small>MIEMBRO</small><strong>{cardClient.name}</strong><p>{cardClient.plan}</p><code>ID {cardClient.token.slice(0,8).toUpperCase()}</code></div></div><div className="card-bottom"><div className="card-loyalty"><small>FIDELIDAD · {cardClient.stamps}/10 SELLOS</small><div className="mini-stamps">{Array.from({length:10},(_,index)=><i key={index} className={index<cardClient.stamps?"on":""}>{index<cardClient.stamps?"M":""}</i>)}</div></div><div className="qr-code">{qrDataUrl&&<img src={qrDataUrl} alt={`QR único de ${cardClient.name}`}/>}</div></div></div><p className="card-help">{cardClient.sessionLimit?`${cardClient.sessionsUsed}/${cardClient.sessionLimit} sesiones utilizadas. `:""}Vigente hasta {formatDate(cardClient.expiresAt)}.</p><div className="share-actions"><button className="download-button" onClick={downloadCard}>{downloadStatus==="working"?"Generando…":"↓ Descargar PNG"}</button><a className="whatsapp-button" target="_blank" rel="noreferrer" href={`https://wa.me/${cardClient.phone.replace(/\D/g,"")}`}>Abrir WhatsApp ↗</a></div></section></div>}
 

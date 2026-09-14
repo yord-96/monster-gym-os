@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { extname, resolve, sep } from "node:path";
+import { getProducts, saveProduct, createCashReceipt, getDailyReport } from "./server/commerce.mjs";
 import {
   openGymDatabase, getState, createClient, updateClient, deleteClient, registerVisit,
   getPlans, createPlan, updatePlan, getPayments, registerPayment, renewMembership,
@@ -165,6 +166,24 @@ async function handleApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, getState(db));
 
+  if (req.method === "GET" && url.pathname === "/api/store/products") return json(res, 200, { products: getProducts(db) });
+  const productMatch = url.pathname.match(/^\/api\/store\/products\/([^/]+)$/);
+  if ((url.pathname === "/api/store/products" && req.method === "POST") || (productMatch && req.method === "PUT")) {
+    try { return json(res, 200, { product: saveProduct(db, await readJson(req), productMatch ? decodeURIComponent(productMatch[1]) : null) }); }
+    catch(error) { return json(res, 400, { error:error.message }); }
+  }
+  if (url.pathname === "/api/cash/receipts" && req.method === "POST") {
+    try {
+      const body = await readJson(req);
+      const voucherPath = body.voucherImage ? imageFromDataUrl(body.voucherImage, "vouchers", "cash") : "";
+      return json(res, 201, { receipt:createCashReceipt(db, {...body,voucherPath}) });
+    } catch(error) { return json(res, 400, {error:error.message}); }
+  }
+  if (url.pathname === "/api/reports/daily" && req.method === "GET") {
+    try { return json(res, 200, getDailyReport(db,url.searchParams.get("date"))); }
+    catch(error) { return json(res, 400, {error:error.message}); }
+  }
+
   if (req.method === "GET" && url.pathname === "/api/plans") return json(res, 200, { plans: getPlans(db) });
   if (req.method === "POST" && url.pathname === "/api/plans") {
     try { return json(res, 201, { plan: createPlan(db, await readJson(req)) }); }
@@ -211,7 +230,7 @@ async function handleApi(req, res) {
     try {
       const body = await readJson(req);
       let voucherPath = "";
-      if (body.method === "qr") voucherPath = imageFromDataUrl(body.voucherImage, "vouchers", `voucher-${decodeURIComponent(payments[1])}`);
+      if (body.voucherImage) voucherPath = imageFromDataUrl(body.voucherImage, "vouchers", `voucher-${decodeURIComponent(payments[1])}`);
       const result = registerPayment(db, decodeURIComponent(payments[1]), { ...body, voucherPath });
       return result ? json(res, 201, result) : json(res, 404, { error: "Cliente no encontrado." });
     } catch (error) { return json(res, 400, { error: error instanceof Error ? error.message : "No se pudo registrar el pago." }); }

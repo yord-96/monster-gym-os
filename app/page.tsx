@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import QRCode from "qrcode";
+import { MembershipCard } from "./membership-card";
 import { AttendanceView } from "./attendance";
 import { BillingView, StoreView, DailyReports, VoucherPicker } from "./commerce";
 
@@ -35,6 +36,7 @@ type ClientRecord = {
   expiresAt: string;
   visits: number;
   stamps: number;
+  cardVariant?: number;
   lastVisit?: string;
   visitHistory?: string[];
   membershipId: string;
@@ -184,23 +186,7 @@ function LoyaltyGalleryCard({ client, onOpen, onVisit }: { client: ClientRecord;
   }, [client.token]);
 
   return <article className="loyalty-gallery-card">
-    <div className="loyalty-card-visual">
-      <div className="gallery-card-top">
-        <div className="mini-brand"><b>M</b><span>MONSTERS<br/><small>GYM OS</small></span></div>
-        <span className={`gallery-status ${client.accessStatus === "active" ? "active" : "expired"}`}>{accessLabel(client)}</span>
-      </div>
-      <div className="gallery-card-member">
-        <ClientAvatar client={client}/>
-        <div><small>MIEMBRO</small><strong>{client.name}</strong><p>{client.plan}</p><code>ID {client.token.slice(0,8).toUpperCase()}</code></div>
-      </div>
-      <div className="gallery-card-bottom">
-        <div className="gallery-visit-total">
-          <small>VISITAS AL GYM</small><strong>{client.visits}</strong>
-          <span>{client.lastVisit ? `Última visita: ${formatDate(client.lastVisit)}` : "Aún sin visitas registradas"}</span>
-        </div>
-        <div className="gallery-qr">{qr ? <img src={qr} alt={`QR único de ${client.name}`}/> : <span>QR</span>}</div>
-      </div>
-    </div>
+    <MembershipCard client={client} qr={qr}/>
     <div className="gallery-card-info">
       <div><strong>{client.visits} visita{client.visits === 1 ? "" : "s"}</strong><span>{client.sessionLimit ? `${client.sessionsUsed}/${client.sessionLimit} sesiones` : "Visitas registradas"}</span></div>
       <div className="gallery-card-actions"><button onClick={() => onOpen(client)}>Ver tarjeta</button><button onClick={() => onVisit(client)} disabled={client.accessStatus !== "active"}>＋ Visita</button></div>
@@ -587,6 +573,7 @@ export default function Home() {
     setDownloadStatus("working");
     try {
       await document.fonts.ready;
+      await Promise.all(Array.from(cardRef.current.querySelectorAll("img")).map(image => image.decode()));
       const width = cardRef.current.offsetWidth; const height = cardRef.current.offsetHeight;
       const image = await toPng(cardRef.current, { width, height, pixelRatio: 3, cacheBust: true, style: { width: `${width}px`, height: `${height}px`, margin: "0", transform: "none" } });
       const link = document.createElement("a");
@@ -797,11 +784,7 @@ export default function Home() {
 
     {deletingClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setDeletingClient(null)}/><section className="delete-modal"><div className="delete-symbol">!</div><span className="modal-kicker">ELIMINAR CLIENTE</span><h2>¿Eliminar a {deletingClient.name}?</h2><p>Se elimina el cliente y sus membresías. Los cobros y vouchers se conservan en Reportes. Esta acción no se puede deshacer.</p><div><button onClick={()=>setDeletingClient(null)}>Cancelar</button><button className="delete-confirm" onClick={deleteClientRecord}>Eliminar definitivamente</button></div></section></div>}
 
-    {cardOpen&&cardClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setCardOpen(false)}/><section className="card-modal"><header><div><span className="modal-kicker">TARJETA DIGITAL</span><h2>{cardClient.name}</h2></div><button className="close-button" onClick={()=>setCardOpen(false)}>×</button></header><div className="digital-card member-pass" ref={cardRef}>
-      <div className="card-top"><div className="mini-brand"><b>M</b><span>MONSTERS<br/><small>GYM</small></span></div><span className="card-tier">CREDENCIAL DE MIEMBRO</span></div>
-      <div className="card-person"><ClientAvatar client={cardClient} className="card-photo"/><div><small>MIEMBRO</small><strong>{cardClient.name}</strong><code>ID {cardClient.token.slice(0,8).toUpperCase()}</code></div></div>
-      <div className="card-bottom"><div className="member-pass-instructions"><span className="member-pass-line"/><strong>Tu próximo nivel<br/>empieza aquí.</strong><p>Presenta tu QR en recepción<br/>para registrar tu ingreso.</p><small>PERSONAL E INTRANSFERIBLE</small></div><div className="qr-code">{qrDataUrl&&<img src={qrDataUrl} alt={`QR único de ${cardClient.name}`}/>}</div></div>
-    </div><p className="card-help">Conserva tu tarjeta. Tus visitas se registran en recepción.</p><div className="share-actions"><button className="download-button" onClick={downloadCard}>{downloadStatus==="working"?"Generando…":"↓ Descargar PNG"}</button><a className="whatsapp-button" target="_blank" rel="noreferrer" href={`https://wa.me/${cardClient.phone.replace(/\D/g,"")}`}>Abrir WhatsApp ↗</a></div></section></div>}
+    {cardOpen&&cardClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setCardOpen(false)}/><section className="card-modal"><header><div><span className="modal-kicker">TARJETA DIGITAL</span><h2>Tu acceso al gimnasio</h2></div><button className="close-button" onClick={()=>setCardOpen(false)}>×</button></header><MembershipCard client={cardClient} qr={qrDataUrl} cardRef={cardRef}/><p className="card-help">Conserva tu tarjeta. Tus visitas se registran en recepción.</p>{downloadStatus==="error"&&<p className="card-help" role="alert">No se pudo generar la tarjeta. Intenta descargarla de nuevo.</p>}<div className="share-actions"><button className="download-button" disabled={!qrDataUrl || downloadStatus==="working"} onClick={downloadCard}>{downloadStatus==="working"?"Generando…":"↓ Descargar PNG"}</button><a className="whatsapp-button" target="_blank" rel="noreferrer" href={`https://wa.me/${cardClient.phone.replace(/\D/g,"")}`}>Abrir WhatsApp ↗</a></div><footer className="membership-modal-footer"><strong>MONSTERS CLUB GYM</strong>DISCIPLINA HOY, RESULTADOS SIEMPRE</footer></section></div>}
 
     {scannerOpen&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={closeScanner}/><section className="scanner-modal"><header><div><span className="modal-kicker">RECEPCIÓN</span><h2>{scanStep==="success"?"Ingreso autorizado":scanStep==="blocked"?"Ingreso bloqueado":scanStep==="found"?"Cliente identificado":scanStep==="missing"?"Tarjeta no encontrada":"Escanear tarjeta"}</h2></div><button className="close-button" onClick={closeScanner}>×</button></header>
       {scanStep==="camera"&&<div className="camera-content"><div className="camera-view real-camera"><div id="qr-reader"/><div className="camera-tip">Centra el QR dentro del marco</div></div>{scanError&&<p className="scan-error">{scanError}</p>}<form className="manual-scan" onSubmit={findManualClient}><input value={manualCode} onChange={(e)=>setManualCode(e.target.value)} placeholder="Código o teléfono"/><button>Buscar</button></form></div>}

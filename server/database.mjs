@@ -202,6 +202,16 @@ export function openGymDatabase(path = process.env.MONSTER_DB_PATH || resolve("d
   `);
 
   ensureColumn(db, "clients", "manual_suspended", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "clients", "card_variant", "INTEGER CHECK(card_variant >= 0 AND card_variant < 6)");
+  // Assign legacy members once, in registration order. Keep the next model even
+  // when a member is deleted so assignments never shift or restart.
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const client of db.prepare("SELECT id FROM clients WHERE card_variant IS NULL ORDER BY created_at, rowid").all()) {
+      db.prepare("UPDATE clients SET card_variant=? WHERE id=?").run(nextCardVariant(db), client.id);
+    }
+    db.exec("COMMIT");
+  } catch (error) { db.exec("ROLLBACK"); throw error; }
   ensureColumn(db, "payments", "request_key", "TEXT");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS payments_request_idx ON payments(request_key) WHERE request_key IS NOT NULL;");
 
@@ -217,6 +227,13 @@ function currentMembershipRow(db, clientId) {
     WHERE client_id=? AND is_current=1
     ORDER BY created_at DESC LIMIT 1
   `).get(clientId);
+}
+
+function nextCardVariant(db) {
+  const current = Number(db.prepare("SELECT value FROM settings WHERE key='next_card_variant'").get()?.value || 0) % 6;
+  db.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('next_card_variant',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at")
+    .run(String((current + 1) % 6), nowIso());
+  return current;
 }
 
 function paidCentsForMembership(db, membershipId) {
@@ -249,6 +266,7 @@ function clientFromRow(db, row) {
   return {
     id: row.id,
     token: row.token,
+    cardVariant: Number(row.card_variant ?? 0),
     name: row.name,
     phone: row.phone,
     plan: membership?.plan_name || row.plan,
@@ -390,9 +408,9 @@ export function createClient(db, input) {
   try {
     db.prepare(`
       INSERT INTO clients
-        (id,token,name,phone,plan,photo,created_at,expires_at,visits,stamps,last_visit,visit_history,manual_suspended)
-      VALUES (?,?,?,?,?,?,?,?,0,0,NULL,'[]',0)
-    `).run(id, token, name, phone, membership.planName, String(input.photo || ""), now, membership.expiresAt);
+        (id,token,name,phone,plan,photo,created_at,expires_at,visits,stamps,last_visit,visit_history,manual_suspended,card_variant)
+      VALUES (?,?,?,?,?,?,?,?,0,0,NULL,'[]',0,?)
+    `).run(id, token, name, phone, membership.planName, String(input.photo || ""), now, membership.expiresAt, nextCardVariant(db));
     insertMembership(db, membership);
     const activity = {
       id: randomUUID(), clientId: id, clientName: name, type: "registro",

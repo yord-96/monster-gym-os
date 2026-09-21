@@ -8,6 +8,39 @@ import {
   getPlans, updatePlan, registerPayment, getPayments, renewMembership, addMonthsClampedIso,
 } from "../server/database.mjs";
 
+test("modelos de tarjeta rotan entre seis animales y permanecen al editar, eliminar y reabrir", () => {
+  const dir = mkdtempSync(join(tmpdir(), "monsters-cards-"));
+  const path = join(dir, "test.sqlite");
+  let db = openGymDatabase(path);
+  try {
+    const clients = Array.from({length:8}, (_, i) => createClient(db, {name:`Miembro ${i}`,phone:`7000000${i}`}).client);
+    assert.deepEqual(clients.map(c => c.cardVariant), [0,1,2,3,4,5,0,1]);
+    assert.equal(updateClient(db,clients[2].id,{name:"Nombre actualizado"}).cardVariant,2);
+    deleteClient(db,clients[7].id);
+    db.close(); db = openGymDatabase(path);
+    assert.equal(getState(db).clients.find(c => c.id === clients[2].id).cardVariant,2);
+    assert.equal(createClient(db,{name:"Siguiente",phone:"71111111"}).client.cardVariant,2);
+  } finally { db.close(); rmSync(dir,{recursive:true,force:true}); }
+});
+
+test("asigna modelos una sola vez a clientes anteriores sin alterar visitas ni QR", () => {
+  const dir = mkdtempSync(join(tmpdir(), "monsters-card-migration-"));
+  const path = join(dir,"test.sqlite");
+  let db = openGymDatabase(path);
+  try {
+    const clients = Array.from({length:7}, (_, i) => createClient(db,{name:`Anterior ${i}`,phone:`7555555${i}`}).client);
+    registerVisit(db,clients[0].id);
+    db.exec("ALTER TABLE clients DROP COLUMN card_variant; DELETE FROM settings WHERE key='next_card_variant';");
+    db.close(); db = openGymDatabase(path);
+    const migrated = getState(db).clients;
+    assert.deepEqual(clients.map(c=>migrated.find(m=>m.id===c.id).cardVariant),[0,1,2,3,4,5,0]);
+    assert.equal(migrated.find(c=>c.id===clients[0].id).visits,1);
+    assert.equal(migrated.find(c=>c.id===clients[0].id).token,clients[0].token);
+    db.close(); db = openGymDatabase(path);
+    assert.equal(createClient(db,{name:"Nuevo",phone:"76666666"}).client.cardVariant,1);
+  } finally { db.close(); rmSync(dir,{recursive:true,force:true}); }
+});
+
 test("SQLite central soporta CRUD, planes, pagos y sesiones", () => {
   const dir = mkdtempSync(join(tmpdir(), "monster-gym-"));
   const db = openGymDatabase(join(dir, "test.sqlite"));

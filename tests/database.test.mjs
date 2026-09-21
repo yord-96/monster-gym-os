@@ -29,7 +29,7 @@ test("SQLite central soporta CRUD, planes, pagos y sesiones", () => {
       name: "Cliente Prueba",
       phone: "70000000",
       planId: monthly.id,
-      startsAt: "2026-09-02T12:00:00.000Z",
+      startsAt: new Date().toISOString(),
     });
     assert.equal(getState(db).clients.length, 1);
     assert.equal(created.client.membershipPrice, 160);
@@ -59,6 +59,7 @@ test("SQLite central soporta CRUD, planes, pagos y sesiones", () => {
     for (let index = 0; index < 12; index += 1) registerVisit(db, created.client.id);
     const afterTwelve = getState(db).clients.find((client) => client.id === created.client.id);
     assert.equal(afterTwelve.sessionsUsed, 12);
+    assert.equal(afterTwelve.visits, 12);
     assert.equal(afterTwelve.accessStatus, "sessions_exhausted");
     assert.throws(() => registerVisit(db, created.client.id), /12 sesiones/);
 

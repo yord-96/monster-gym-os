@@ -10,6 +10,7 @@ import "./mobile-navigation.css";
 import "./form-contrast.css";
 import "./commerce.css";
 import "./attendance.css";
+import "./member-pass.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -22,7 +23,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Monster Gym OS — Gestión y fidelidad",
+  title: "Monsters Gym OS — Gestión y fidelidad",
   description: "Clientes, membresías, asistencias y fidelidad en un solo lugar.",
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };

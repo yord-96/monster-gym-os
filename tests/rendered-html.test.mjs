@@ -14,13 +14,13 @@ async function render() {
   );
 }
 
-test("renderiza la aplicación Monster Gym", async () => {
+test("renderiza la aplicación Monsters Gym", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Monster Gym OS — Gestión y fidelidad<\/title>/i);
+  assert.match(html, /<title>Monsters Gym OS — Gestión y fidelidad<\/title>/i);
   assert.match(html, /MONSTER/);
   assert.doesNotMatch(html, /codex-preview|Building your site/);
 });

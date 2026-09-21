@@ -92,7 +92,6 @@ const tokenFromQr = (value: string) => {
     return decoded.replace(/^ID\s*/i, "");
   }
 };
-const clientVisitHistory = (client: ClientRecord) => client.visitHistory ?? (client.lastVisit ? [client.lastVisit] : []);
 const todayInput = () => new Date().toISOString().slice(0, 10);
 
 class ApiError extends Error {
@@ -187,7 +186,7 @@ function LoyaltyGalleryCard({ client, onOpen, onVisit }: { client: ClientRecord;
   return <article className="loyalty-gallery-card">
     <div className="loyalty-card-visual">
       <div className="gallery-card-top">
-        <div className="mini-brand"><b>M</b><span>MONSTER<br/><small>GYM OS</small></span></div>
+        <div className="mini-brand"><b>M</b><span>MONSTERS<br/><small>GYM OS</small></span></div>
         <span className={`gallery-status ${client.accessStatus === "active" ? "active" : "expired"}`}>{accessLabel(client)}</span>
       </div>
       <div className="gallery-card-member">
@@ -195,18 +194,15 @@ function LoyaltyGalleryCard({ client, onOpen, onVisit }: { client: ClientRecord;
         <div><small>MIEMBRO</small><strong>{client.name}</strong><p>{client.plan}</p><code>ID {client.token.slice(0,8).toUpperCase()}</code></div>
       </div>
       <div className="gallery-card-bottom">
-        <div className="gallery-loyalty">
-          <div><small>FIDELIDAD</small><strong>{client.stamps}/10 sellos</strong></div>
-          <div className="gallery-stamps">{Array.from({ length: 10 }, (_, index) => {
-            const visit = clientVisitHistory(client)[index];
-            return <i className={index < client.stamps ? "filled" : ""} key={index} title={visit ? `Sello ${index + 1}: ${formatDateTime(visit)}` : `Sello ${index + 1} pendiente`}>{index < client.stamps ? "M" : ""}</i>;
-          })}</div>
+        <div className="gallery-visit-total">
+          <small>VISITAS AL GYM</small><strong>{client.visits}</strong>
+          <span>{client.lastVisit ? `Última visita: ${formatDate(client.lastVisit)}` : "Aún sin visitas registradas"}</span>
         </div>
         <div className="gallery-qr">{qr ? <img src={qr} alt={`QR único de ${client.name}`}/> : <span>QR</span>}</div>
       </div>
     </div>
     <div className="gallery-card-info">
-      <div><strong>{client.visits} visita{client.visits === 1 ? "" : "s"}</strong><span>{client.sessionLimit ? `${client.sessionsUsed}/${client.sessionLimit} sesiones` : `${client.stamps}/10 sellos`}</span></div>
+      <div><strong>{client.visits} visita{client.visits === 1 ? "" : "s"}</strong><span>{client.sessionLimit ? `${client.sessionsUsed}/${client.sessionLimit} sesiones` : "Visitas registradas"}</span></div>
       <div className="gallery-card-actions"><button onClick={() => onOpen(client)}>Ver tarjeta</button><button onClick={() => onVisit(client)} disabled={client.accessStatus !== "active"}>＋ Visita</button></div>
     </div>
   </article>;
@@ -389,7 +385,7 @@ export default function Home() {
             if (scanHandledRef.current) return;
             const token = tokenFromQr(decoded);
             const found = clients.find((item) => item.token === token || item.token.startsWith(token.replace(/^ID\s*/i, "")));
-            if (!found) { setScanError("El QR no pertenece a un cliente registrado en Monster Gym."); return; }
+            if (!found) { setScanError("El QR no pertenece a un cliente registrado en Monsters Gym."); return; }
             scanHandledRef.current = true;
             try { await instance.stop(); } catch { /* scanner may already be stopped */ }
             try { await instance.clear(); } catch { /* scanner may already be cleared */ }
@@ -595,7 +591,7 @@ export default function Home() {
       const image = await toPng(cardRef.current, { width, height, pixelRatio: 3, cacheBust: true, style: { width: `${width}px`, height: `${height}px`, margin: "0", transform: "none" } });
       const link = document.createElement("a");
       const safeName = cardClient.name.toLowerCase().replace(/[^a-z0-9áéíóúñ]+/gi, "-").replace(/^-|-$/g, "");
-      link.download = `tarjeta-monster-${safeName}.png`; link.href = image; link.click(); setDownloadStatus("done");
+      link.download = `tarjeta-monsters-${safeName}.png`; link.href = image; link.click(); setDownloadStatus("done");
     } catch { setDownloadStatus("error"); }
   };
 
@@ -637,7 +633,7 @@ export default function Home() {
   if (authState !== "authenticated") {
     return <main className="login-shell">
       <section className="login-card">
-        <div className="login-brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div>
+        <div className="login-brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTERS</strong><small>GYM OS</small></div></div>
         {authState === "checking" ? <div className="login-loading">Verificando sesión…</div> : <form onSubmit={login}>
           <span className="view-kicker">ACCESO DE RECEPCIÓN</span>
           <h1>Control central del gimnasio</h1>
@@ -651,7 +647,7 @@ export default function Home() {
   }
 
   const dashboardView = <>
-    <div className="mobile-home-heading mobile-home-only"><div><h1>Monster Gym —<br/>Sucursal Central</h1><p><span className="status-dot"/> Sucursal activa <span className="mobile-date">{formatDate(new Date().toISOString())}</span></p></div><button onClick={openNewClient}><MobileIcon name="users"/> Nuevo cliente</button></div>
+    <div className="mobile-home-heading mobile-home-only"><div><h1>Monsters Gym —<br/>Sucursal Central</h1><p><span className="status-dot"/> Sucursal activa <span className="mobile-date">{formatDate(new Date().toISOString())}</span></p></div><button onClick={openNewClient}><MobileIcon name="users"/> Nuevo cliente</button></div>
     <div className="view-heading"><div><span className="view-kicker">RECEPCIÓN</span><h1>Tu gimnasio, al día</h1><p>Control de accesos, miembros y pagos en un solo lugar.</p></div><span className="today-label">{formatDate(new Date().toISOString())}</span></div>
     <section className="scanner-card">
       <div className="scanner-copy"><span className="live-pill"><i/> CONTROL DE ACCESO</span><h2>Registra el próximo ingreso</h2><p>Verifica el plan, el saldo y las sesiones disponibles al escanear.</p><small><span className="mobile-member-stack mobile-home-only" aria-hidden="true">{clients.slice(0,3).map(client=><ClientAvatar key={client.id} client={client}/>)}</span>{clients.length ? `${clients.length} clientes sincronizados` : "Primero registra un cliente"}</small></div>
@@ -677,7 +673,7 @@ export default function Home() {
       <div className="client-filter-tabs" aria-label="Filtrar clientes por estado">{clientFilters.filter(filter=>filter.id!=="sessions" || clients.some(filter.matches)).map(filter=><button key={filter.id} className={`filter-${filter.id}`} aria-pressed={clientFilter===filter.id} onClick={()=>setClientFilter(filter.id)}>{filter.label}<span>{clients.filter(filter.matches).length}</span></button>)}</div>
       <div className="mobile-client-list">{mobileClients.map(item=><article className="member-tile" key={item.id}>
         <header className="member-tile-heading"><ClientAvatar client={item}/><div><h2>{item.name}</h2><a href={`tel:${item.phone.replace(/[^\d+]/g,"")}`}>{item.phone}</a></div><span className={`member-state ${item.accessStatus}`}>{accessLabel(item)}</span><button className="member-open" aria-label={`Ver tarjeta de ${item.name}`} onClick={()=>showCard(item)}>›</button></header>
-        <div className="member-facts"><div><p><MobileIcon name="plans"/><span>Plan {item.plan}</span></p><p><MobileIcon name="check"/><span>Vence {formatDate(item.expiresAt)}</span></p></div><div><p><MobileIcon name="users"/><span>{item.sessionLimit ? `${item.sessionsUsed}/${item.sessionLimit} sesiones` : `${item.visits} visita${item.visits===1?"":"s"}`}</span></p><p><MobileIcon name="star"/><span>{item.stamps}/10 sellos</span></p></div></div>
+        <div className="member-facts"><div><p><MobileIcon name="plans"/><span>Plan {item.plan}</span></p><p><MobileIcon name="check"/><span>Vence {formatDate(item.expiresAt)}</span></p></div><div><p><MobileIcon name="users"/><span>{item.sessionLimit ? `${item.sessionsUsed}/${item.sessionLimit} sesiones` : `${item.visits} visita${item.visits===1?"":"s"}`}</span></p><p><MobileIcon name="star"/><span>{item.visits} visita{item.visits === 1 ? "" : "s"} al gym</span></p></div></div>
         <footer className="member-tile-footer"><button className={`member-balance ${item.paymentStatus}`} onClick={()=>openPayment(item)}><strong>{paymentLabel(item)}</strong> {item.balance ? `${money(item.balance)} saldo` : "Sin saldo"}</button><details className="member-options" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))event.currentTarget.open=false;}}><summary aria-label={`Acciones de ${item.name}`} onKeyDown={event=>{if(event.key==="Escape"){const details=event.currentTarget.closest("details");if(details)details.open=false;}}}><MobileIcon name="more"/></summary><div className="member-options-menu"><button onClick={()=>openPayment(item)}>Registrar pago</button><button onClick={()=>{visitSubmittingRef.current=false;setScannedClient(item);setScanStep(item.accessStatus==="active"?"found":"blocked");setScannerOpen(true);}}>Registrar visita</button><button onClick={()=>showCard(item)}>Ver tarjeta</button><button onClick={()=>openRenew(item)}>Renovar plan</button><button onClick={()=>openEditClient(item)}>Editar cliente</button><a target="_blank" rel="noreferrer" href={`https://wa.me/${item.phone.replace(/\D/g,"")}`}>WhatsApp</a><button className="member-delete" onClick={()=>setDeletingClient(item)}>Eliminar cliente</button></div></details></footer>
       </article>)}</div>
       {!mobileClients.length&&<div className="member-empty"><MobileIcon name="users"/><h2>{clients.length ? "Sin coincidencias" : "Todavía no hay clientes"}</h2><p>{clients.length ? "Prueba otro nombre o estado." : "Registra tu primer miembro para comenzar."}</p><button onClick={()=>{if(clients.length){setSearch("");setClientFilter("all");}else openNewClient();}}>{clients.length ? "Mostrar todos" : "Nuevo cliente"}</button></div>}
@@ -688,7 +684,7 @@ export default function Home() {
       {filteredClients.map((item)=><div className="client-row" key={item.id}>
         <div className="client-identity"><ClientAvatar client={item}/><div><strong>{item.name}</strong><small>{item.phone}</small></div></div>
         <div className="client-plan-cell"><strong>{item.plan}</strong><small>Vence {formatDate(item.expiresAt)}</small><em className={`payment-pill ${item.paymentStatus}`}>{paymentLabel(item)} · {item.balance ? `${money(item.balance)} saldo` : "sin saldo"}</em></div>
-        <div className="client-usage"><strong>{item.sessionLimit ? `${item.sessionsUsed}/${item.sessionLimit} sesiones` : `${item.visits} visitas`}</strong><small>{item.stamps}/10 sellos</small></div>
+        <div className="client-usage"><strong>{item.sessionLimit ? `${item.sessionsUsed}/${item.sessionLimit} sesiones` : `${item.visits} visitas`}</strong><small>{item.visits} visita{item.visits === 1 ? "" : "s"} al gym</small></div>
         <span className={`status-badge ${item.accessStatus}`}>{accessLabel(item)}</span>
         <div className="row-actions">
           <button onClick={()=>openPayment(item)}>Cobrar</button>
@@ -719,7 +715,7 @@ export default function Home() {
 
   const activeLoyaltyCards = filteredClients.filter((item)=>item.accessStatus==="active").length;
   const loyaltyView = <section className="view-page loyalty-page">
-    <div className="view-heading"><div><span className="view-kicker">GALERÍA DE TARJETAS</span><h1>Fidelidad</h1><p>QR único y sellos de cada miembro.</p></div></div>
+    <div className="view-heading"><div><span className="view-kicker">GALERÍA DE TARJETAS</span><h1>Fidelidad</h1><p>Tarjetas de miembros y control de visitas.</p></div></div>
     <div className="list-toolbar loyalty-toolbar"><div className="search-box"><MobileIcon name="search"/><input value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="Buscar tarjeta"/></div></div>
     {filteredClients.length ? <>
       <div className="loyalty-gallery">{filteredClients.map((item)=><LoyaltyGalleryCard client={item} key={item.id} onOpen={showCard} onVisit={(client)=>{setScannedClient(client);setScanStep(client.accessStatus==="active"?"found":"blocked");setScannerOpen(true);}}/>)}</div>
@@ -738,16 +734,16 @@ export default function Home() {
   const moreIsActive = view === "fidelidad" || view === "planes" || view === "reportes" || view === "tienda";
 
   return <main className={`app-shell ${view === "inicio" ? "mobile-home" : view === "clientes" ? "mobile-home mobile-clients" : view === "planes" ? "mobile-home mobile-plans" : view === "fidelidad" ? "mobile-home mobile-loyalty" : view === "asistencias" ? "mobile-home mobile-attendance" : ["cobros","reportes","tienda"].includes(view) ? "mobile-home mobile-commerce" : ""}`}>
-    <header className="mobile-home-topbar mobile-home-only"><div className="mobile-brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div><div className="mobile-header-actions"><button aria-label="Buscar clientes" onClick={()=>{go("clientes");requestAnimationFrame(()=>document.querySelector<HTMLInputElement>(".clients-page .search-box input")?.focus());}}><MobileIcon name="search"/></button><button aria-label="Ver actividad reciente" onClick={()=>go("asistencias")}><MobileIcon name="bell"/></button><button className="mobile-profile" aria-label="Abrir opciones" onClick={()=>setMobileMoreOpen(true)}>MO</button></div></header>
+    <header className="mobile-home-topbar mobile-home-only"><div className="mobile-brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTERS</strong><small>GYM OS</small></div></div><div className="mobile-header-actions"><button aria-label="Buscar clientes" onClick={()=>{go("clientes");requestAnimationFrame(()=>document.querySelector<HTMLInputElement>(".clients-page .search-box input")?.focus());}}><MobileIcon name="search"/></button><button aria-label="Ver actividad reciente" onClick={()=>go("asistencias")}><MobileIcon name="bell"/></button><button className="mobile-profile" aria-label="Abrir opciones" onClick={()=>setMobileMoreOpen(true)}>MO</button></div></header>
     <nav className="mobile-bottom-nav mobile-home-only" aria-label="Navegación móvil">{([{view:"inicio",label:"Inicio",icon:"home"},{view:"clientes",label:"Clientes",icon:"users"},{view:"asistencias",label:"Asistencias",icon:"check"},{view:"cobros",label:"Cobros",icon:"money"}] as const).map((item)=><button key={item.view} aria-current={view===item.view ? "page" : undefined} onClick={()=>go(item.view)}><MobileIcon name={item.icon}/><span>{item.label}</span></button>)}<button aria-current={moreIsActive ? "page" : undefined} onClick={()=>setMobileMoreOpen(true)}><MobileIcon name="more"/><span>Más</span></button></nav>
     {mobileMoreOpen&&<div className="mobile-more-layer mobile-home-only" role="dialog" aria-modal="true" aria-label="Más opciones">
       <button className="mobile-more-scrim" aria-label="Cerrar más opciones" onClick={()=>setMobileMoreOpen(false)}/>
       <section className="mobile-more-sheet">
         <div className="mobile-more-handle"/>
-        <header><div><small>MONSTER GYM OS</small><h2>Más opciones</h2></div><button aria-label="Cerrar" onClick={()=>setMobileMoreOpen(false)}>×</button></header>
+        <header><div><small>MONSTERS GYM OS</small><h2>Más opciones</h2></div><button aria-label="Cerrar" onClick={()=>setMobileMoreOpen(false)}>×</button></header>
         <nav>
           <button className={view==="planes"?"active":""} onClick={()=>go("planes")}><span><MobileIcon name="plans"/></span><div><strong>Planes</strong><small>Membresías y precios</small></div><b>›</b></button>
-          <button className={view==="fidelidad"?"active":""} onClick={()=>go("fidelidad")}><span><MobileIcon name="star"/></span><div><strong>Fidelidad</strong><small>Tarjetas, QR y sellos</small></div><b>›</b></button>
+          <button className={view==="fidelidad"?"active":""} onClick={()=>go("fidelidad")}><span><MobileIcon name="star"/></span><div><strong>Fidelidad</strong><small>Tarjetas, QR y visitas</small></div><b>›</b></button>
           <button className={view==="asistencias"?"active":""} onClick={()=>go("asistencias")}><span><MobileIcon name="check"/></span><div><strong>Asistencias</strong><small>Historial y control de ingresos</small></div><b>›</b></button>
           <button className={view==="reportes"?"active":""} onClick={()=>go("reportes")}><span><MobileIcon name="plans"/></span><div><strong>Reportes</strong><small>Ingresos diarios y vouchers</small></div><b>›</b></button>
           <button className={view==="tienda"?"active":""} onClick={()=>go("tienda")}><span><MobileIcon name="plans"/></span><div><strong>Tienda</strong><small>Artículos y precios</small></div><b>›</b></button>
@@ -756,7 +752,7 @@ export default function Home() {
       </section>
     </div>}
     <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
-      <div className="brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTER</strong><small>GYM OS</small></div></div>
+      <div className="brand"><div className="brand-mark"><span>M</span></div><div><strong>MONSTERS</strong><small>GYM OS</small></div></div>
       <nav aria-label="Navegación principal">
         <p className="nav-label">GESTIÓN</p>
         <button className={`nav-item ${view==="inicio"?"active":""}`} onClick={()=>go("inicio")}><span className="nav-icon">⌂</span> Inicio</button>
@@ -772,7 +768,7 @@ export default function Home() {
       <div className="sidebar-footer"><div className="storage-mini"><span className="status-dot"/><div><strong>BASE CENTRAL</strong><small>SQLite · respaldos de pago</small></div></div><button className="profile-button" onClick={logout}><span className="avatar avatar-small">MO</span><span><strong>Administrador</strong><small>Cerrar sesión</small></span></button></div>
     </aside>
     {sidebarOpen&&<button className="backdrop" aria-label="Cerrar menú" onClick={()=>setSidebarOpen(false)}/>}
-    <section className="main-content"><header className="topbar"><button className="menu-button" aria-label="Abrir menú" onClick={()=>setSidebarOpen(true)}>☰</button><div className="gym-status"><span className="status-dot"/> Monster Gym — Sucursal Central</div><div className="top-actions"><button className="icon-button" onClick={()=>go("clientes")}>⌕</button><button className="primary-button" onClick={openNewClient}><span>＋</span> Nuevo cliente</button></div></header><div className="dashboard">{centralError&&<div className="central-error"><strong>Error de sincronización.</strong><span>{centralError}</span><button onClick={()=>void loadCentralState()}>Reintentar</button></div>}{!centralLoaded&&!centralError&&<div className="central-loading">Sincronizando datos…</div>}{content[view]}</div></section>
+    <section className="main-content"><header className="topbar"><button className="menu-button" aria-label="Abrir menú" onClick={()=>setSidebarOpen(true)}>☰</button><div className="gym-status"><span className="status-dot"/> Monsters Gym — Sucursal Central</div><div className="top-actions"><button className="icon-button" onClick={()=>go("clientes")}>⌕</button><button className="primary-button" onClick={openNewClient}><span>＋</span> Nuevo cliente</button></div></header><div className="dashboard">{centralError&&<div className="central-error"><strong>Error de sincronización.</strong><span>{centralError}</span><button onClick={()=>void loadCentralState()}>Reintentar</button></div>}{!centralLoaded&&!centralError&&<div className="central-loading">Sincronizando datos…</div>}{content[view]}</div></section>
 
     {clientOpen&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setClientOpen(false)}/><section className="client-modal"><header><div><span className="modal-kicker">{editingClient?"EDITAR MIEMBRO":"NUEVO MIEMBRO"}</span><h2>{editingClient?"Editar cliente":"Registrar cliente"}</h2><p>{editingClient?"El plan se renueva desde la acción Renovar.":"La vigencia se calcula de fecha a fecha."}</p></div><button className="close-button" onClick={()=>setClientOpen(false)}>×</button></header><form onSubmit={saveClient}>
       <label className={`photo-input ${photoUrl?"has-photo":""}`}>{photoUrl?<img src={photoUrl} alt="Vista previa"/>:<span>＋</span>}<strong>{photoUrl?"Foto cargada":"Añadir foto"}</strong><small>JPG, PNG o WEBP</small><input type="file" accept="image/png,image/jpeg,image/webp" onChange={handlePhoto}/></label>
@@ -801,14 +797,18 @@ export default function Home() {
 
     {deletingClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setDeletingClient(null)}/><section className="delete-modal"><div className="delete-symbol">!</div><span className="modal-kicker">ELIMINAR CLIENTE</span><h2>¿Eliminar a {deletingClient.name}?</h2><p>Se elimina el cliente y sus membresías. Los cobros y vouchers se conservan en Reportes. Esta acción no se puede deshacer.</p><div><button onClick={()=>setDeletingClient(null)}>Cancelar</button><button className="delete-confirm" onClick={deleteClientRecord}>Eliminar definitivamente</button></div></section></div>}
 
-    {cardOpen&&cardClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setCardOpen(false)}/><section className="card-modal"><header><div><span className="modal-kicker">TARJETA DIGITAL</span><h2>{cardClient.name}</h2></div><button className="close-button" onClick={()=>setCardOpen(false)}>×</button></header><div className="digital-card" ref={cardRef}><div className="card-top"><div className="mini-brand"><b>M</b><span>MONSTER<br/><small>GYM OS</small></span></div><span className="card-tier">{accessLabel(cardClient)}</span></div><div className="card-person"><ClientAvatar client={cardClient} className="card-photo"/><div><small>MIEMBRO</small><strong>{cardClient.name}</strong><p>{cardClient.plan}</p><code>ID {cardClient.token.slice(0,8).toUpperCase()}</code></div></div><div className="card-bottom"><div className="card-loyalty"><small>FIDELIDAD · {cardClient.stamps}/10 SELLOS</small><div className="mini-stamps">{Array.from({length:10},(_,index)=><i key={index} className={index<cardClient.stamps?"on":""}>{index<cardClient.stamps?"M":""}</i>)}</div></div><div className="qr-code">{qrDataUrl&&<img src={qrDataUrl} alt={`QR único de ${cardClient.name}`}/>}</div></div></div><p className="card-help">{cardClient.sessionLimit?`${cardClient.sessionsUsed}/${cardClient.sessionLimit} sesiones utilizadas. `:""}Vigente hasta {formatDate(cardClient.expiresAt)}.</p><div className="share-actions"><button className="download-button" onClick={downloadCard}>{downloadStatus==="working"?"Generando…":"↓ Descargar PNG"}</button><a className="whatsapp-button" target="_blank" rel="noreferrer" href={`https://wa.me/${cardClient.phone.replace(/\D/g,"")}`}>Abrir WhatsApp ↗</a></div></section></div>}
+    {cardOpen&&cardClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setCardOpen(false)}/><section className="card-modal"><header><div><span className="modal-kicker">TARJETA DIGITAL</span><h2>{cardClient.name}</h2></div><button className="close-button" onClick={()=>setCardOpen(false)}>×</button></header><div className="digital-card member-pass" ref={cardRef}>
+      <div className="card-top"><div className="mini-brand"><b>M</b><span>MONSTERS<br/><small>GYM</small></span></div><span className="card-tier">CREDENCIAL DE MIEMBRO</span></div>
+      <div className="card-person"><ClientAvatar client={cardClient} className="card-photo"/><div><small>MIEMBRO</small><strong>{cardClient.name}</strong><code>ID {cardClient.token.slice(0,8).toUpperCase()}</code></div></div>
+      <div className="card-bottom"><div className="member-pass-instructions"><span className="member-pass-line"/><strong>Tu próximo nivel<br/>empieza aquí.</strong><p>Presenta tu QR en recepción<br/>para registrar tu ingreso.</p><small>PERSONAL E INTRANSFERIBLE</small></div><div className="qr-code">{qrDataUrl&&<img src={qrDataUrl} alt={`QR único de ${cardClient.name}`}/>}</div></div>
+    </div><p className="card-help">Conserva tu tarjeta. Tus visitas se registran en recepción.</p><div className="share-actions"><button className="download-button" onClick={downloadCard}>{downloadStatus==="working"?"Generando…":"↓ Descargar PNG"}</button><a className="whatsapp-button" target="_blank" rel="noreferrer" href={`https://wa.me/${cardClient.phone.replace(/\D/g,"")}`}>Abrir WhatsApp ↗</a></div></section></div>}
 
     {scannerOpen&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={closeScanner}/><section className="scanner-modal"><header><div><span className="modal-kicker">RECEPCIÓN</span><h2>{scanStep==="success"?"Ingreso autorizado":scanStep==="blocked"?"Ingreso bloqueado":scanStep==="found"?"Cliente identificado":scanStep==="missing"?"Tarjeta no encontrada":"Escanear tarjeta"}</h2></div><button className="close-button" onClick={closeScanner}>×</button></header>
       {scanStep==="camera"&&<div className="camera-content"><div className="camera-view real-camera"><div id="qr-reader"/><div className="camera-tip">Centra el QR dentro del marco</div></div>{scanError&&<p className="scan-error">{scanError}</p>}<form className="manual-scan" onSubmit={findManualClient}><input value={manualCode} onChange={(e)=>setManualCode(e.target.value)} placeholder="Código o teléfono"/><button>Buscar</button></form></div>}
       {scanStep==="missing"&&<div className="missing-state"><div className="missing-symbol">!</div><h3>Cliente no encontrado</h3><button className="confirm-visit" onClick={closeScanner}>Entendido</button></div>}
       {scanStep==="blocked"&&scannedClient&&<div className="blocked-state"><div className="blocked-symbol">!</div><span className="found-label">INGRESO BLOQUEADO</span><h3>{scannedClient.name}</h3><strong>{accessLabel(scannedClient)}</strong><p>{scannedClient.accessReason}</p>{scannedClient.balance>0&&<div className="block-debt"><span>Saldo pendiente</span><b>{money(scannedClient.balance)}</b><small>Tolerancia hasta {formatDate(scannedClient.graceUntil)}</small></div>}{scannedClient.sessionLimit&&<div className="block-debt"><span>Sesiones</span><b>{scannedClient.sessionsUsed}/{scannedClient.sessionLimit}</b></div>}<button className="confirm-visit" onClick={()=>{closeScanner();void openPayment(scannedClient);}}>Ir a cobro</button><button className="text-action" onClick={closeScanner}>Cerrar</button></div>}
       {scanStep==="found"&&scannedClient&&<div className="found-client"><div className="member-hero"><ClientAvatar client={scannedClient} className="found-avatar"/><span className="verified">✓</span></div><span className="found-label">INGRESO HABILITADO</span><h3>{scannedClient.name}</h3><p>{scannedClient.plan} · Vence {formatDate(scannedClient.expiresAt)}</p><div className="access-facts"><div><span>Pago</span><strong>{paymentLabel(scannedClient)}</strong><small>{scannedClient.balance?`${money(scannedClient.balance)} pendiente`:"Sin saldo"}</small></div><div><span>Uso</span><strong>{scannedClient.sessionLimit?`${scannedClient.sessionsUsed}/${scannedClient.sessionLimit}`:`${scannedClient.visits}`}</strong><small>{scannedClient.sessionLimit?"sesiones":"visitas"}</small></div></div><button className="confirm-visit" onClick={confirmVisit}>Confirmar ingreso <span>＋1 visita</span></button><button className="text-action" onClick={()=>{scanHandledRef.current=false;visitSubmittingRef.current=false;setScanStep("camera");setScannedClient(null);}}>Escanear otro</button></div>}
-      {scanStep==="success"&&scannedClient&&<div className="success-state"><div className="success-burst">✓</div><span className="found-label">INGRESO AUTORIZADO</span><h3>{scannedClient.name}</h3><p>Visita registrada correctamente.<br/>{scannedClient.sessionLimit&&<strong>{scannedClient.sessionsUsed}/{scannedClient.sessionLimit} sesiones utilizadas</strong>}</p><div className="reward-chip"><span>✦</span><div><small>FIDELIDAD</small><strong>{scannedClient.stamps}/10 sellos</strong></div></div><button className="confirm-visit" onClick={closeScanner}>Listo, continuar</button></div>}
+      {scanStep==="success"&&scannedClient&&<div className="success-state"><div className="success-burst">✓</div><span className="found-label">INGRESO AUTORIZADO</span><h3>{scannedClient.name}</h3><p>Visita registrada correctamente.<br/>{scannedClient.sessionLimit&&<strong>{scannedClient.sessionsUsed}/{scannedClient.sessionLimit} sesiones utilizadas</strong>}</p><div className="reward-chip"><span>✦</span><div><small>FIDELIDAD</small><strong>{scannedClient.visits} visita{scannedClient.visits === 1 ? "" : "s"} al gym</strong></div></div><button className="confirm-visit" onClick={closeScanner}>Listo, continuar</button></div>}
     </section></div>}
   </main>;
 }

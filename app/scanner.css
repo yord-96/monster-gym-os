@@ -1,0 +1,7 @@
+/* Match the preview to the actual video surface used by the decoder. */
+.camera-view.real-camera { height:auto; min-height:200px; background:#0b100b; }
+.real-camera #qr-reader { height:auto; min-height:200px; }
+.real-camera #qr-reader video { display:block; width:100%!important; height:auto!important; object-fit:contain!important; transform:none!important; }
+.real-camera .camera-tip { pointer-events:none; }
+.scanner-modal { overflow:auto; }
+.scanner-modal .camera-content { background:#fff; }

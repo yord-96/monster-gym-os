@@ -43,7 +43,7 @@ test("incluye base central, CRUD, planes, deuda, QR de cobro y vouchers", async 
   assert.match(page, /SUSPENDIDO POR DEUDA/);
   assert.match(page, /SESIONES AGOTADAS/);
   assert.match(page, /https:\/\/wa\.me/);
-  assert.match(page, /QRCode\.toDataURL/);
+  assert.match(page, /memberQrUrl/);
   assert.match(page, /MONSTER-GYM:/);
   assert.match(page, /pixelRatio: 3/);
 

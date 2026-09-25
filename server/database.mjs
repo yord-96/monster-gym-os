@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { initCommerce } from "./commerce.mjs";
+import { photoUrl } from "./delivery.mjs";
 
 const DEFAULT_PLAN_IDS = {
   monthly: "plan-monthly",
@@ -202,6 +203,7 @@ export function openGymDatabase(path = process.env.MONSTER_DB_PATH || resolve("d
   `);
 
   ensureColumn(db, "clients", "manual_suspended", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "clients", "gender", "TEXT CHECK(gender IN ('male','female'))");
   ensureColumn(db, "clients", "card_variant", "INTEGER CHECK(card_variant >= 0 AND card_variant < 6)");
   // Assign legacy members once, in registration order. Keep the next model even
   // when a member is deleted so assignments never shift or restart.
@@ -267,11 +269,12 @@ function clientFromRow(db, row) {
     id: row.id,
     token: row.token,
     cardVariant: Number(row.card_variant ?? 0),
+    gender: row.gender ?? null,
     name: row.name,
     phone: row.phone,
     plan: membership?.plan_name || row.plan,
     planId: membership?.plan_id || "",
-    photo: row.photo || "",
+    photo: photoUrl(row.id, row.photo || ""),
     createdAt: row.created_at,
     expiresAt: membership?.expires_at || row.expires_at,
     visits: Number(row.visits || 0),
@@ -395,6 +398,8 @@ function insertMembership(db, membership) {
 }
 
 export function createClient(db, input) {
+  const gender = input.gender || null;
+  if (gender !== null && !["male","female"].includes(gender)) throw new Error("Selecciona Varón o Mujer.");
   const name = String(input.name || "").trim();
   const phone = String(input.phone || "").trim();
   if (!name || !phone) throw new Error("Nombre y WhatsApp son obligatorios.");
@@ -408,9 +413,9 @@ export function createClient(db, input) {
   try {
     db.prepare(`
       INSERT INTO clients
-        (id,token,name,phone,plan,photo,created_at,expires_at,visits,stamps,last_visit,visit_history,manual_suspended,card_variant)
-      VALUES (?,?,?,?,?,?,?,?,0,0,NULL,'[]',0,?)
-    `).run(id, token, name, phone, membership.planName, String(input.photo || ""), now, membership.expiresAt, nextCardVariant(db));
+        (id,token,name,phone,plan,photo,created_at,expires_at,visits,stamps,last_visit,visit_history,manual_suspended,card_variant,gender)
+      VALUES (?,?,?,?,?,?,?,?,0,0,NULL,'[]',0,?,?)
+    `).run(id, token, name, phone, membership.planName, String(input.photo || ""), now, membership.expiresAt, nextCardVariant(db),gender);
     insertMembership(db, membership);
     const activity = {
       id: randomUUID(), clientId: id, clientName: name, type: "registro",
@@ -428,11 +433,14 @@ export function updateClient(db, id, input) {
   if (!current) return null;
   const name = String(input.name ?? current.name).trim();
   const phone = String(input.phone ?? current.phone).trim();
-  const photo = String(input.photo ?? current.photo);
+  const photo = input.photo == null || input.photo === photoUrl(id, current.photo)
+    ? current.photo : String(input.photo);
   const manualSuspended = input.manualSuspended == null ? Number(current.manual_suspended || 0) : (input.manualSuspended ? 1 : 0);
   if (!name || !phone) throw new Error("Nombre y WhatsApp son obligatorios.");
-  db.prepare("UPDATE clients SET name=?,phone=?,photo=?,manual_suspended=? WHERE id=?")
-    .run(name, phone, photo, manualSuspended, id);
+  const gender = input.gender === undefined ? current.gender : input.gender || null;
+  if (gender !== null && !["male","female"].includes(gender)) throw new Error("Selecciona Varón o Mujer.");
+  db.prepare("UPDATE clients SET name=?,phone=?,photo=?,manual_suspended=?,gender=? WHERE id=?")
+    .run(name, phone, photo, manualSuspended, gender, id);
   db.prepare("UPDATE activities SET client_name=? WHERE client_id=?").run(name, id);
   return getClientById(db, id);
 }

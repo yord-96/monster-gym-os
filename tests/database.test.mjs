@@ -23,6 +23,36 @@ test("modelos de tarjeta rotan entre seis animales y permanecen al editar, elimi
   } finally { db.close(); rmSync(dir,{recursive:true,force:true}); }
 });
 
+test("la sincronización devuelve URL de foto y editar conserva la imagen original", () => {
+  const db = openGymDatabase(":memory:");
+  try {
+    const photo="data:image/png;base64,aGVsbG8=";
+    const client=createClient(db,{name:"Foto",phone:"70000000",photo}).client;
+    assert.match(client.photo,/^\/api\/clients\/.+\/photo\?v=/);
+    updateClient(db,client.id,{name:"Foto editada",photo:client.photo});
+    assert.equal(db.prepare("SELECT photo FROM clients WHERE id=?").get(client.id).photo,photo);
+    assert.equal(getState(db).clients[0].photo,client.photo);
+    const changed=updateClient(db,client.id,{photo:"data:image/png;base64,d29ybGQ="});
+    assert.notEqual(changed.photo,client.photo);
+    assert.equal(updateClient(db,client.id,{photo:""}).photo,"");
+  } finally { db.close(); }
+});
+
+test("guarda Varón/Mujer y permite cambiar diseño sin alterar animal asignado ni QR", () => {
+  const db=openGymDatabase(":memory:");
+  try {
+    const male=createClient(db,{name:"Cliente",phone:"70000000",gender:"male"}).client;
+    const female=createClient(db,{name:"Clienta",phone:"71111111",gender:"female"}).client;
+    assert.equal(male.gender,"male");assert.equal(female.gender,"female");
+    const changed=updateClient(db,male.id,{gender:"female"});
+    assert.equal(changed.gender,"female");assert.equal(changed.token,male.token);assert.equal(changed.cardVariant,male.cardVariant);
+    assert.equal(updateClient(db,male.id,{name:"Nombre actualizado"}).gender,"female");
+    assert.equal(createClient(db,{name:"Sin asignar",phone:"72222222"}).client.gender,null);
+    assert.throws(()=>createClient(db,{name:"Inválido",phone:"73333333",gender:"invalid"}),/Selecciona/);
+    assert.throws(()=>updateClient(db,male.id,{gender:"invalid"}),/Selecciona/);
+  } finally {db.close();}
+});
+
 test("asigna modelos una sola vez a clientes anteriores sin alterar visitas ni QR", () => {
   const dir = mkdtempSync(join(tmpdir(), "monsters-card-migration-"));
   const path = join(dir,"test.sqlite");

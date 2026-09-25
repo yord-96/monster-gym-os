@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toPng } from "html-to-image";
-import QRCode from "qrcode";
+import { createScannerLifecycle } from "./scanner-lifecycle.mjs";
+import type { Html5Qrcode } from "html5-qrcode";
 import { MembershipCard } from "./membership-card";
 import { AttendanceView } from "./attendance";
 import { BillingView, StoreView, DailyReports, VoucherPicker } from "./commerce";
@@ -37,6 +37,7 @@ type ClientRecord = {
   visits: number;
   stamps: number;
   cardVariant?: number;
+  gender?: "male" | "female" | null;
   lastVisit?: string;
   visitHistory?: string[];
   membershipId: string;
@@ -82,7 +83,7 @@ const money = (value: number) => new Intl.NumberFormat("es-BO", { style: "curren
 const formatDate = (value: string) => value ? new Intl.DateTimeFormat("es-BO", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value)) : "—";
 const formatDateTime = (value: string) => value ? new Intl.DateTimeFormat("es-BO", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)) : "—";
 const isToday = (value: string) => new Date(value).toDateString() === new Date().toDateString();
-const memberQrValue = (token: string) => `MONSTER-GYM:${token}`;
+const memberQrUrl = (id: string) => `/api/clients/${encodeURIComponent(id)}/qr`;
 const tokenFromQr = (value: string) => {
   const decoded = value.trim();
   if (/^MONSTER-GYM:/i.test(decoded)) return decoded.replace(/^MONSTER-GYM:/i, "");
@@ -177,16 +178,8 @@ function ClientAvatar({ client, className = "" }: { client: ClientRecord; classN
 }
 
 function LoyaltyGalleryCard({ client, onOpen, onVisit }: { client: ClientRecord; onOpen: (client: ClientRecord) => void; onVisit: (client: ClientRecord) => void }) {
-  const [qr, setQr] = useState("");
-  useEffect(() => {
-    let active = true;
-    QRCode.toDataURL(memberQrValue(client.token), { errorCorrectionLevel: "M", width: 640, margin: 4, color: { dark: "#17141f", light: "#ffffff" } })
-      .then((value) => { if (active) setQr(value); });
-    return () => { active = false; };
-  }, [client.token]);
-
   return <article className="loyalty-gallery-card">
-    <MembershipCard client={client} qr={qr}/>
+    <MembershipCard client={client} qr={memberQrUrl(client.id)}/>
     <div className="gallery-card-info">
       <div><strong>{client.visits} visita{client.visits === 1 ? "" : "s"}</strong><span>{client.sessionLimit ? `${client.sessionsUsed}/${client.sessionLimit} sesiones` : "Visitas registradas"}</span></div>
       <div className="gallery-card-actions"><button onClick={() => onOpen(client)}>Ver tarjeta</button><button onClick={() => onVisit(client)} disabled={client.accessStatus !== "active"}>＋ Visita</button></div>
@@ -216,7 +209,7 @@ export default function Home() {
   const [clientOpen, setClientOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<ClientRecord | null>(null);
   const [deletingClient, setDeletingClient] = useState<ClientRecord | null>(null);
-  const [clientForm, setClientForm] = useState({ name: "", phone: "", planId: "", startsAt: todayInput(), manualSuspended: false });
+  const [clientForm, setClientForm] = useState({ name: "", phone: "", gender: "", planId: "", startsAt: todayInput(), manualSuspended: false });
   const [photoUrl, setPhotoUrl] = useState("");
   const [formError, setFormError] = useState("");
   const [clientSaving, setClientSaving] = useState(false);
@@ -243,7 +236,7 @@ export default function Home() {
 
   const [cardOpen, setCardOpen] = useState(false);
   const [cardClient, setCardClient] = useState<ClientRecord | null>(null);
-  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [qrSource, setQrSource] = useState("");
   const [downloadStatus, setDownloadStatus] = useState<"idle" | "working" | "done" | "error">("idle");
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -254,10 +247,14 @@ export default function Home() {
   const [manualCode, setManualCode] = useState("");
   const paymentRequestKey = useRef("");
   const paymentSubmitting = useRef(false);
-  const scannerRef = useRef<{ stop: () => Promise<void>; clear: () => void | Promise<void> } | null>(null);
+  const cameraLifecycle = useRef(createScannerLifecycle());
+  const scannerClients = useRef(clients);
+  useEffect(() => { scannerClients.current = clients; }, [clients]);
   const checkInHandledRef = useRef(false);
   const scanHandledRef = useRef(false);
   const visitSubmittingRef = useRef(false);
+  const stateLoading = useRef(false);
+  const stateEtag = useRef("");
 
   const activePlans = useMemo(() => plans.filter((plan) => plan.active), [plans]);
 
@@ -269,8 +266,14 @@ export default function Home() {
   }, []);
 
   const loadCentralState = useCallback(async (silent = false) => {
+    if (stateLoading.current) return;
+    stateLoading.current = true;
     try {
-      const data = await apiJson<{ clients: ClientRecord[]; activities: ActivityRecord[]; plans: PlanRecord[]; settings: AppSettings }>("/api/state");
+      const response = await fetch("/api/state", { credentials:"same-origin", cache:"no-store", signal:AbortSignal.timeout(15000), headers:stateEtag.current ? {"If-None-Match":stateEtag.current} : {} });
+      if (response.status === 304) { setCentralError(""); return; }
+      const data = await response.json();
+      if (!response.ok) throw new ApiError(data.error || `Error ${response.status}`,response.status,data);
+      stateEtag.current = response.headers.get("ETag") || "";
       setClients(data.clients ?? []);
       setActivities(data.activities ?? []);
       setPlans(data.plans ?? []);
@@ -279,11 +282,12 @@ export default function Home() {
       setCentralError("");
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
+        stateEtag.current = "";
         setAuthState("login");
         return;
       }
       if (!silent) setCentralError(error instanceof Error ? error.message : "No se pudo conectar con la base central.");
-    }
+    } finally { stateLoading.current = false; }
   }, []);
 
   const registerVisitForClient = useCallback(async (client: ClientRecord) => {
@@ -329,12 +333,12 @@ export default function Home() {
   }, [hydrated]);
 
   useEffect(() => {
-    if (authState !== "authenticated") return;
+    if (authState !== "authenticated") { stateEtag.current = ""; return; }
     // Initial synchronization intentionally hydrates central server state after authentication.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadCentralState();
     const refresh = () => { if (document.visibilityState === "visible") void loadCentralState(true); };
-    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void loadCentralState(true); }, 5000);
+    const timer = window.setInterval(refresh, 15000);
     document.addEventListener("visibilitychange", refresh);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
   }, [authState, loadCentralState]);
@@ -354,45 +358,49 @@ export default function Home() {
 
   useEffect(() => {
     if (!scannerOpen || scanStep !== "camera") return;
-    let cancelled = false;
-    const start = async () => {
-      try {
+    const dispose = cameraLifecycle.current.open(
+      async () => {
         const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode");
-        if (cancelled || !document.getElementById("qr-reader")) return;
-        const instance = new Html5Qrcode("qr-reader", { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], useBarCodeDetectorIfSupported: true });
-        scannerRef.current = instance;
+        return new Html5Qrcode("qr-reader", { verbose:false, formatsToSupport:[Html5QrcodeSupportedFormats.QR_CODE], useBarCodeDetectorIfSupported:true });
+      },
+      async (instance: Html5Qrcode, isCancelled: () => boolean) => {
         await instance.start(
-          { facingMode: "environment" },
+          { facingMode: { ideal: "environment" } },
           {
-            fps: 15, aspectRatio: 1,
-            qrbox: (width, height) => { const size = Math.floor(Math.min(width, height) * 0.78); return { width: size, height: size }; },
+            fps:10, disableFlip:true,
+            videoConstraints:{ facingMode:{ideal:"environment"}, width:{ideal:1280}, height:{ideal:720}, frameRate:{ideal:30,max:30} },
+            qrbox:(width,height) => { const size=Math.max(1,Math.floor(Math.min(width,height)*0.8)); return {width:size,height:size}; },
           },
-          async (decoded) => {
-            if (scanHandledRef.current) return;
-            const token = tokenFromQr(decoded);
-            const found = clients.find((item) => item.token === token || item.token.startsWith(token.replace(/^ID\s*/i, "")));
-            if (!found) { setScanError("El QR no pertenece a un cliente registrado en Monsters Gym."); return; }
-            scanHandledRef.current = true;
-            try { await instance.stop(); } catch { /* scanner may already be stopped */ }
-            try { await instance.clear(); } catch { /* scanner may already be cleared */ }
-            setScannedClient(found);
-            setScanStep(found.accessStatus === "active" ? "found" : "blocked");
+          (decoded) => {
+            if (isCancelled() || scanHandledRef.current) return;
+            const token=tokenFromQr(decoded).trim();
+            if (!token) return;
+            const found=scannerClients.current.find(item=>item.token===token || item.token.startsWith(token.replace(/^ID\s*/i,"")));
+            if (!found) {setScanError("El QR no pertenece a un cliente registrado en Monsters Gym.");return;}
+            scanHandledRef.current=true;
+            setScanError("");setScannedClient(found);
+            setScanStep(found.accessStatus==="active"?"found":"blocked");
           },
           () => undefined,
         );
-      } catch {
-        if (!cancelled) setScanError("No se pudo iniciar la cámara. Puedes ingresar el código manualmente.");
-      }
-    };
-    const timer = window.setTimeout(start, 100);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-      const active = scannerRef.current;
-      scannerRef.current = null;
-      if (active) void (async () => { try { await active.stop(); } catch { /* scanner may already be stopped */ } try { await active.clear(); } catch { /* scanner may already be cleared */ } })();
-    };
-  }, [scannerOpen, scanStep, clients]);
+        if (isCancelled()) return;
+        // Autofocus is optional; unsupported controls must not interrupt scanning.
+        try {
+          const capabilities=instance.getRunningTrackCapabilities() as MediaTrackCapabilities & {focusMode?:string[]};
+          if (capabilities.focusMode?.includes("continuous")) {
+            await instance.applyVideoConstraints({advanced:[{focusMode:"continuous"} as MediaTrackConstraintSet]});
+          }
+        } catch { /* the camera keeps its native focus mode */ }
+      },
+      (error: unknown) => {
+        const name=error instanceof Error ? error.name : String(error);
+        setScanError(/NotAllowed|Permission/.test(name)
+          ? "Permite el acceso a la c\u00e1mara en el navegador. Tambi\u00e9n puedes ingresar el c\u00f3digo manualmente."
+          : "No se pudo iniciar la c\u00e1mara. Cierra otras aplicaciones que la usen o ingresa el c\u00f3digo manualmente.");
+      },
+    );
+    return () => { void dispose(); };
+  }, [scannerOpen, scanStep]);
 
   const login = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -420,13 +428,13 @@ export default function Home() {
   const openNewClient = () => {
     const first = activePlans[0];
     setEditingClient(null);
-    setClientForm({ name: "", phone: "", planId: first?.id ?? "", startsAt: todayInput(), manualSuspended: false });
+    setClientForm({ name: "", phone: "", gender: "", planId: first?.id ?? "", startsAt: todayInput(), manualSuspended: false });
     setPhotoUrl(""); setFormError(""); setClientOpen(true);
   };
 
   const openEditClient = (client: ClientRecord) => {
     setEditingClient(client);
-    setClientForm({ name: client.name, phone: client.phone, planId: client.planId, startsAt: client.membershipStartedAt.slice(0,10), manualSuspended: client.manualSuspended });
+    setClientForm({ name: client.name, phone: client.phone, gender: client.gender ?? "", planId: client.planId, startsAt: client.membershipStartedAt.slice(0,10), manualSuspended: client.manualSuspended });
     setPhotoUrl(client.photo); setFormError(""); setClientOpen(true);
   };
 
@@ -442,18 +450,19 @@ export default function Home() {
     const name = clientForm.name.trim();
     const phone = clientForm.phone.trim();
     if (!name || !phone || (!editingClient && !clientForm.planId)) { setFormError("Completa nombre, WhatsApp y plan."); return; }
+    if (!clientForm.gender) { setFormError("Selecciona Var\u00f3n o Mujer."); return; }
     setClientSaving(true); setFormError("");
     try {
       if (editingClient) {
         const result = await apiJson<{ client: ClientRecord }>(`/api/clients/${encodeURIComponent(editingClient.id)}`, {
           method: "PUT",
-          body: JSON.stringify({ name, phone, photo: photoUrl, manualSuspended: clientForm.manualSuspended }),
+          body: JSON.stringify({ name, phone, gender: clientForm.gender, photo: photoUrl, manualSuspended: clientForm.manualSuspended }),
         });
         replaceClient(result.client);
       } else {
         const result = await apiJson<{ client: ClientRecord; activity: ActivityRecord }>("/api/clients", {
           method: "POST",
-          body: JSON.stringify({ name, phone, planId: clientForm.planId, startsAt: `${clientForm.startsAt}T12:00:00Z`, photo: photoUrl }),
+          body: JSON.stringify({ name, phone, gender: clientForm.gender, planId: clientForm.planId, startsAt: `${clientForm.startsAt}T12:00:00Z`, photo: photoUrl }),
         });
         setClients((current) => [result.client, ...current]);
         setActivities((current) => [result.activity, ...current]);
@@ -564,17 +573,18 @@ export default function Home() {
   };
 
   const showCard = async (record: ClientRecord) => {
-    const qr = await QRCode.toDataURL(memberQrValue(record.token), { errorCorrectionLevel: "M", width: 1024, margin: 4, color: { dark: "#17141f", light: "#ffffff" } });
-    setCardClient(record); setQrDataUrl(qr); setDownloadStatus("idle"); setCardOpen(true);
+    const qr = memberQrUrl(record.id);
+    setCardClient(record); setQrSource(qr); setDownloadStatus("idle"); setCardOpen(true);
   };
 
   const downloadCard = async () => {
-    if (!cardRef.current || !cardClient || !qrDataUrl) return;
+    if (!cardRef.current || !cardClient || !qrSource) return;
     setDownloadStatus("working");
     try {
       await document.fonts.ready;
       await Promise.all(Array.from(cardRef.current.querySelectorAll("img")).map(image => image.decode()));
       const width = cardRef.current.offsetWidth; const height = cardRef.current.offsetHeight;
+      const { toPng } = await import("html-to-image");
       const image = await toPng(cardRef.current, { width, height, pixelRatio: 3, cacheBust: true, style: { width: `${width}px`, height: `${height}px`, margin: "0", transform: "none" } });
       const link = document.createElement("a");
       const safeName = cardClient.name.toLowerCase().replace(/[^a-z0-9áéíóúñ]+/gi, "-").replace(/^-|-$/g, "");
@@ -760,6 +770,7 @@ export default function Home() {
     {clientOpen&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setClientOpen(false)}/><section className="client-modal"><header><div><span className="modal-kicker">{editingClient?"EDITAR MIEMBRO":"NUEVO MIEMBRO"}</span><h2>{editingClient?"Editar cliente":"Registrar cliente"}</h2><p>{editingClient?"El plan se renueva desde la acción Renovar.":"La vigencia se calcula de fecha a fecha."}</p></div><button className="close-button" onClick={()=>setClientOpen(false)}>×</button></header><form onSubmit={saveClient}>
       <label className={`photo-input ${photoUrl?"has-photo":""}`}>{photoUrl?<img src={photoUrl} alt="Vista previa"/>:<span>＋</span>}<strong>{photoUrl?"Foto cargada":"Añadir foto"}</strong><small>JPG, PNG o WEBP</small><input type="file" accept="image/png,image/jpeg,image/webp" onChange={handlePhoto}/></label>
       <div className="field-grid"><label><span>Nombre completo</span><input required value={clientForm.name} onChange={(e)=>setClientForm({...clientForm,name:e.target.value})}/></label><label><span>WhatsApp</span><input required value={clientForm.phone} onChange={(e)=>setClientForm({...clientForm,phone:e.target.value})}/></label></div>
+      <label className="full-field"><span>Varón / Mujer</span><select required value={clientForm.gender} onChange={e=>setClientForm({...clientForm,gender:e.target.value})}><option value="">Selecciona una opción</option><option value="male">Varón · tarjeta con animal</option><option value="female">Mujer · tarjeta de gimnasio</option></select></label>
       {!editingClient&&<div className="field-grid"><label><span>Plan</span><select value={clientForm.planId} onChange={(e)=>setClientForm({...clientForm,planId:e.target.value})}>{activePlans.map((plan)=><option value={plan.id} key={plan.id}>{plan.name} · {plan.price?money(plan.price):"precio pendiente"}</option>)}</select></label><label><span>Inicio</span><input type="date" value={clientForm.startsAt} onChange={(e)=>setClientForm({...clientForm,startsAt:e.target.value})}/></label></div>}
       {editingClient&&<div className="switch-field"><input aria-label="Suspensión manual" type="checkbox" checked={clientForm.manualSuspended} onChange={(e)=>setClientForm({...clientForm,manualSuspended:e.target.checked})}/><span><strong>Suspensión manual</strong><small>Bloquea el ingreso aunque el plan esté vigente y pagado.</small></span></div>}
       {formError&&<p className="form-error">{formError}</p>}
@@ -784,7 +795,7 @@ export default function Home() {
 
     {deletingClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setDeletingClient(null)}/><section className="delete-modal"><div className="delete-symbol">!</div><span className="modal-kicker">ELIMINAR CLIENTE</span><h2>¿Eliminar a {deletingClient.name}?</h2><p>Se elimina el cliente y sus membresías. Los cobros y vouchers se conservan en Reportes. Esta acción no se puede deshacer.</p><div><button onClick={()=>setDeletingClient(null)}>Cancelar</button><button className="delete-confirm" onClick={deleteClientRecord}>Eliminar definitivamente</button></div></section></div>}
 
-    {cardOpen&&cardClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setCardOpen(false)}/><section className="card-modal"><header><div><span className="modal-kicker">TARJETA DIGITAL</span><h2>Tu acceso al gimnasio</h2></div><button className="close-button" onClick={()=>setCardOpen(false)}>×</button></header><MembershipCard client={cardClient} qr={qrDataUrl} cardRef={cardRef}/><p className="card-help">Conserva tu tarjeta. Tus visitas se registran en recepción.</p>{downloadStatus==="error"&&<p className="card-help" role="alert">No se pudo generar la tarjeta. Intenta descargarla de nuevo.</p>}<div className="share-actions"><button className="download-button" disabled={!qrDataUrl || downloadStatus==="working"} onClick={downloadCard}>{downloadStatus==="working"?"Generando…":"↓ Descargar PNG"}</button><a className="whatsapp-button" target="_blank" rel="noreferrer" href={`https://wa.me/${cardClient.phone.replace(/\D/g,"")}`}>Abrir WhatsApp ↗</a></div><footer className="membership-modal-footer"><strong>MONSTERS CLUB GYM</strong>DISCIPLINA HOY, RESULTADOS SIEMPRE</footer></section></div>}
+    {cardOpen&&cardClient&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={()=>setCardOpen(false)}/><section className="card-modal"><header><div><span className="modal-kicker">TARJETA DIGITAL</span><h2>Tu acceso al gimnasio</h2></div><button className="close-button" onClick={()=>setCardOpen(false)}>×</button></header><MembershipCard client={cardClient} qr={qrSource} cardRef={cardRef}/><p className="card-help">Conserva tu tarjeta. Tus visitas se registran en recepción.</p>{downloadStatus==="error"&&<p className="card-help" role="alert">No se pudo generar la tarjeta. Intenta descargarla de nuevo.</p>}<div className="share-actions"><button className="download-button" disabled={!qrSource || downloadStatus==="working"} onClick={downloadCard}>{downloadStatus==="working"?"Generando…":"↓ Descargar PNG"}</button><a className="whatsapp-button" target="_blank" rel="noreferrer" href={`https://wa.me/${cardClient.phone.replace(/\D/g,"")}`}>Abrir WhatsApp ↗</a></div><footer className="membership-modal-footer"><strong>MONSTERS CLUB GYM</strong>DISCIPLINA HOY, RESULTADOS SIEMPRE</footer></section></div>}
 
     {scannerOpen&&<div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={closeScanner}/><section className="scanner-modal"><header><div><span className="modal-kicker">RECEPCIÓN</span><h2>{scanStep==="success"?"Ingreso autorizado":scanStep==="blocked"?"Ingreso bloqueado":scanStep==="found"?"Cliente identificado":scanStep==="missing"?"Tarjeta no encontrada":"Escanear tarjeta"}</h2></div><button className="close-button" onClick={closeScanner}>×</button></header>
       {scanStep==="camera"&&<div className="camera-content"><div className="camera-view real-camera"><div id="qr-reader"/><div className="camera-tip">Centra el QR dentro del marco</div></div>{scanError&&<p className="scan-error">{scanError}</p>}<form className="manual-scan" onSubmit={findManualClient}><input value={manualCode} onChange={(e)=>setManualCode(e.target.value)} placeholder="Código o teléfono"/><button>Buscar</button></form></div>}

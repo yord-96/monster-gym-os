@@ -11,6 +11,7 @@ import "./form-contrast.css";
 import "./commerce.css";
 import "./attendance.css";
 import "./member-pass.css";
+import "./scanner.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

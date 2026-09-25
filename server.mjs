@@ -1,4 +1,5 @@
 import http from "node:http";
+import { sendState, sendPhoto, sendQr } from "./server/delivery.mjs";
 import { spawn } from "node:child_process";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -164,7 +165,17 @@ async function handleApi(req, res) {
 
   if (!isAuthenticated(req)) return json(res, 401, { error: "Sesión requerida." });
 
-  if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, getState(db));
+  if (req.method === "GET" && url.pathname === "/api/state") return sendState(req, res, getState(db));
+  const photoMatch = url.pathname.match(/^\/api\/clients\/([^/]+)\/photo$/);
+  if (req.method === "GET" && photoMatch) {
+    const client = db.prepare("SELECT photo FROM clients WHERE id=?").get(decodeURIComponent(photoMatch[1]));
+    return sendPhoto(req, res, client?.photo);
+  }
+  const qrMatch = url.pathname.match(/^\/api\/clients\/([^/]+)\/qr$/);
+  if (req.method === "GET" && qrMatch) {
+    const client = db.prepare("SELECT token FROM clients WHERE id=?").get(decodeURIComponent(qrMatch[1]));
+    return sendQr(req,res,client?.token);
+  }
 
   if (req.method === "GET" && url.pathname === "/api/store/products") return json(res, 200, { products: getProducts(db) });
   const productMatch = url.pathname.match(/^\/api\/store\/products\/([^/]+)$/);
@@ -264,6 +275,22 @@ async function handleApi(req, res) {
 
 const server = http.createServer((req, res) => {
   const pathname = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`).pathname;
+  if (/^\/card-animals\/optimized\/(bear|lion|tiger|wolf|gorilla|bull)-v[12]\.webp$/.test(pathname) && (req.method === "GET" || req.method === "HEAD")) {
+    const file = resolve(`public${pathname}`);
+    if (existsSync(file)) {
+      res.writeHead(200,{"Content-Type":"image/webp","Cache-Control":"public, max-age=31536000, immutable"});
+      if (req.method === "HEAD") res.end(); else createReadStream(file).pipe(res);
+      return;
+    }
+  }
+  if (pathname === "/card-backgrounds/gym-lime-v1.webp" && (req.method === "GET" || req.method === "HEAD")) {
+    const file = resolve("public/card-backgrounds/gym-lime-v1.webp");
+    if (existsSync(file)) {
+      res.writeHead(200,{"Content-Type":"image/webp","Cache-Control":"public, max-age=31536000, immutable"});
+      if (req.method === "HEAD") res.end(); else createReadStream(file).pipe(res);
+      return;
+    }
+  }
   if (pathname.startsWith("/uploads/")) { serveUpload(req, res, pathname); return; }
   if (pathname.startsWith("/api/")) { void handleApi(req, res); return; }
 
